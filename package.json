@@ -1,6 +1,6 @@
 {
   "name": "aiws",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop workspace for AI coding CLIs. Run Claude Code, Codex and others side by side, isolated per project.",
   "license": "Apache-2.0",
   "type": "module",
@@ -25,7 +25,7 @@
     "gui:typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "gui:build": "electron-vite build",
     "gui:preview": "electron-vite preview",
-    "gui:package": "electron-vite build && electron-builder --win --config electron-builder.yml --publish never"
+    "gui:package": "electron-vite build && electron-builder --config electron-builder.yml --publish never"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",

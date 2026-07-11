@@ -1,6 +1,6 @@
 name: Release
 
-# Push a version tag (e.g. v0.2.0) to build the Windows installer and publish a GitHub Release.
+# Push a version tag (e.g. v0.2.0) to build the Windows, macOS and Linux apps and publish a Release.
 on:
   push:
     tags: ["v*"]
@@ -17,15 +17,47 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run gui:package # electron-vite build + electron-builder --win (no MSVC: npmRebuild off)
+      - run: npm run gui:package # electron-builder builds for the host OS (no MSVC: npmRebuild off)
       - uses: actions/upload-artifact@v4
         with:
-          name: aiws-gui-windows
+          name: aiws-windows
           path: dist-gui/*.exe
 
+  gui-macos:
+    runs-on: macos-14 # Apple Silicon
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false # unsigned build, do not look for a signing identity
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run gui:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiws-macos
+          path: dist-gui/*.dmg
+
+  gui-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run gui:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiws-linux
+          path: |
+            dist-gui/*.AppImage
+            dist-gui/*.deb
+
   release:
-    needs: [gui-windows]
-    if: ${{ !cancelled() }}
+    needs: [gui-windows, gui-macos, gui-linux]
+    if: ${{ !cancelled() }} # publish whatever built, even if one platform failed
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

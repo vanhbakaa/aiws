@@ -13,6 +13,7 @@ export function registerIpc(bridge: SessionBridge, panelHost: PanelHost, init: I
   ipcMain.handle("workspace:getTree", () => bridge.getTree());
   ipcMain.handle("panel:get", () => panelHost.snapshot());
   ipcMain.handle("tab:open", (_e, req: OpenTabRequest) => bridge.openTab(req));
+  ipcMain.handle("account:add", (_e, req: OpenTabRequest) => bridge.addAccountTab(req));
   ipcMain.handle("tab:close", (_e, tabId: string) => bridge.closeTab(tabId));
   ipcMain.handle("tab:setActive", (_e, index: number) => bridge.setActiveTab(index));
   ipcMain.handle("accounts:list", (_e, providerId: string) => bridge.listAccounts(providerId));

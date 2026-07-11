@@ -110,19 +110,33 @@ export function prepareRun(
   let note: string | undefined;
   if (loadWorkspace().carryConversation !== false) {
     const en = getLocale() === "en";
-    const native = prepareNativeCarry(project, providerId);
-    if (native) {
-      sessionId = native.sessionId;
-      args = [...provider.launchCmd.slice(1), ...native.resumeArgs];
-      note = en
-        ? `Loaded ${native.count} messages from ${native.from} (native resume).`
-        : `Đã nạp ${native.count} tin nhắn từ ${native.from} (session native).`;
+    // CÙNG provider (claude): trạng thái project của claude nằm trong .claude.json theo config-dir,
+    // KHÔNG chia sẻ qua junction — nên transcript được share vẫn không hiện trong /resume ở tab mới.
+    // Thay vào đó RESUME thẳng phiên GẦN NHẤT của project (theo id transcript mới nhất), như khi
+    // switch account. latestTranscriptFile chỉ có với claude (đọc projects/<enc>/) → codex bỏ qua.
+    // Dùng --continue (KHÔNG --resume <id>): --resume mở đúng 1 phiên → nếu phiên đó đang mở ở tab
+    // khác/khoá thì claude huỷ ("Resume cancelled"). --continue nối tiếp hội thoại gần nhất, không
+    // picker, không khoá. latestTranscriptFile chỉ có với claude (projects/<enc>/) → codex bỏ qua.
+    const ownLatest = provider.continueFlag ? latestTranscriptFile(configDir, project.path) : null;
+    if (ownLatest) {
+      sessionId = undefined; // --continue tự chọn phiên mới nhất
+      args = [...provider.launchCmd.slice(1), provider.continueFlag as string];
+      note = en ? "Continuing your latest conversation." : "Đang tiếp tục hội thoại gần nhất.";
     } else {
-      const h = writeHandoff(project, providerId);
-      if (h)
+      const native = prepareNativeCarry(project, providerId);
+      if (native) {
+        sessionId = native.sessionId;
+        args = [...provider.launchCmd.slice(1), ...native.resumeArgs];
         note = en
-          ? `Saved ${h.count} msgs from ${h.from} to ${h.file} — ask the AI to read it.`
-          : `Đã lưu ${h.count} tin nhắn từ ${h.from} vào ${h.file} — nhờ AI đọc để tiếp.`;
+          ? `Loaded ${native.count} messages from ${native.from} (native resume).`
+          : `Đã nạp ${native.count} tin nhắn từ ${native.from} (session native).`;
+      } else {
+        const h = writeHandoff(project, providerId);
+        if (h)
+          note = en
+            ? `Saved ${h.count} msgs from ${h.from} to ${h.file} — ask the AI to read it.`
+            : `Đã lưu ${h.count} tin nhắn từ ${h.from} vào ${h.file} — nhờ AI đọc để tiếp.`;
+      }
     }
   }
 

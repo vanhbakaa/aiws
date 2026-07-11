@@ -80,6 +80,30 @@ export class TerminalRegistry {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(layer);
+    // Clipboard: xterm wires none. Ctrl+C stays as interrupt; Ctrl+Shift+C copies the selection,
+    // Ctrl+Shift+V pastes. Right click copies when there is a selection, otherwise pastes.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey) || !e.shiftKey) return true;
+      const k = e.key.toLowerCase();
+      if (k === "c" && term.hasSelection()) {
+        void navigator.clipboard.writeText(term.getSelection());
+        return false;
+      }
+      if (k === "v") {
+        void navigator.clipboard.readText().then((t) => t && term.paste(t));
+        return false;
+      }
+      return true;
+    });
+    layer.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (term.hasSelection()) {
+        void navigator.clipboard.writeText(term.getSelection());
+        term.clearSelection();
+      } else {
+        void navigator.clipboard.readText().then((t) => t && term.paste(t));
+      }
+    });
     try {
       fit.fit();
     } catch {

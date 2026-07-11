@@ -221,6 +221,9 @@ body.col-resizing .xterm { pointer-events: none; }
 .resetline { color: var(--dim); font-size: 11.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .resetline b { color: var(--green); font-weight: 600; }
 .actline { color: var(--dim); font-size: 11.5px; margin-top: 8px; }
+.actline .linkbtn { cursor: pointer; }
+.actline .linkbtn:hover { color: var(--accent); }
+.actline .linkbtn:hover kbd { color: var(--accent); border-color: var(--accent); }
 .actline kbd { color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-family: var(--mono); font-size: 10.5px; }
 .modelrow { display: flex; align-items: center; gap: 8px; margin: 8px 0 7px; color: var(--ink); }
 .modelrow .mdot { width: 8px; height: 8px; background: var(--magenta); transform: rotate(45deg); flex: none; }

@@ -14,6 +14,7 @@ export interface Provider {
   launchCmd: string[];        // lệnh chạy, vd ["claude"]
   sessionIdFlag?: string;     // flag bắt đầu phiên với id cho trước, vd "--session-id"
   resumeFlag?: string;        // flag resume phiên theo id, vd "--resume"
+  continueFlag?: string;      // flag tiếp tục hội thoại GẦN NHẤT (không id, không picker), vd "--continue"
   isolationEnv: string[];     // các env var cần cô lập, vd ["CLAUDE_CONFIG_DIR"]
   authMethods: AuthMethod[];  // các cách liên kết provider này hỗ trợ
   apiKeyEnv?: string;         // env chứa API key, vd "ANTHROPIC_API_KEY"

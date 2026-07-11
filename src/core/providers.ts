@@ -14,6 +14,7 @@ export const PRESET_PROVIDERS: Provider[] = [
     launchCmd: ["claude"],
     sessionIdFlag: "--session-id", // verify từ `claude --help`
     resumeFlag: "--resume",
+    continueFlag: "--continue", // tiếp tục hội thoại gần nhất, không hiện picker (né "Resume cancelled")
     isolationEnv: ["CLAUDE_CONFIG_DIR"],
     authMethods: ["oauth_login", "api_key", "cloud", "custom_base_url"],
     apiKeyEnv: "ANTHROPIC_API_KEY",

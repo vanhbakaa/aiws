@@ -217,7 +217,9 @@ export function readClaudeAccount(configDir: string): string | null {
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     const j: any = JSON.parse(raw);
     const acc = j.oauthAccount ?? j.account ?? {};
-    return acc.displayName ?? acc.emailAddress ?? acc.email ?? j.emailAddress ?? j.email ?? null;
+    const email: string | undefined = acc.emailAddress ?? acc.email ?? j.emailAddress ?? j.email;
+    // Tên hiển thị trước; chỉ còn email thì che phần domain (đừng lộ địa chỉ đầy đủ).
+    return acc.displayName ?? (email ? email.split("@")[0] : null);
   } catch {
     return null;
   }

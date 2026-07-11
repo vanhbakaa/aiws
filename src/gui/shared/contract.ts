@@ -101,6 +101,7 @@ export interface AiwsApi {
   getTree(): Promise<ProjectTree>;
   getPanel(): Promise<PanelSnapshot>;
   openTab(req: OpenTabRequest): Promise<CommandResult<TabSnapshot>>;
+  addAccountTab(req: OpenTabRequest): Promise<CommandResult<TabSnapshot>>;
   closeTab(tabId: string): Promise<void>;
   setActiveTab(index: number): Promise<void>;
   listAccounts(providerId: string): Promise<AccountInfo[]>;

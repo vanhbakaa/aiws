@@ -92,6 +92,21 @@ export function App() {
     if (r.ok) await openProjectTab(r.value.projectName, providerRef.current);
   }, [openProjectTab]);
 
+  // Add account: open a fresh-login tab for the active AI tab's provider (new isolated account slot).
+  const addAccountForActive = useCallback(async () => {
+    const act = snapRef.current.tabs[snapRef.current.active];
+    if (!act || act.providerId === "shell") return;
+    const { cols, rows, prepId } = reg.prepare();
+    const res = await aiws.addAccountTab({ projectName: act.projectName, providerId: act.providerId, cols, rows });
+    if (!res.ok) {
+      reg.discardPrepared(prepId);
+      setToast({ msg: res.error, kind: "error" });
+      window.setTimeout(() => setToast(null), 5000);
+      return;
+    }
+    reg.adopt(res.value.id, prepId);
+  }, [reg]);
+
   // wiring: events + initial hydrate + bootstrap the initial project's tab
   useEffect(() => {
     if (hostRef.current) reg.attachHost(hostRef.current);
@@ -122,6 +137,9 @@ export function App() {
         }
         case "account-menu":
           if (act && act.providerId !== "shell") setModal("account");
+          break;
+        case "add-account":
+          void addAccountForActive();
           break;
         case "open-folder":
         case "new-project":
@@ -177,7 +195,7 @@ export function App() {
       offStatus();
       window.removeEventListener("resize", onResize);
     };
-  }, [reg, openProjectTab, openFolder, toggleLang]);
+  }, [reg, openProjectTab, openFolder, toggleLang, addAccountForActive]);
 
   // vertical splitter drag: window-level listeners so tracking survives over the terminal canvas
   useEffect(() => {
@@ -249,7 +267,7 @@ export function App() {
         <div className="gutter" onMouseDown={startDrag("left")} />
         <TerminalPane ref={hostRef} active={active} hasTabs={snap.tabs.length > 0} onOpenFolder={() => void openFolder()} />
         {showCtx && <div className="gutter" onMouseDown={startDrag("right")} />}
-        {showCtx && <ContextPanel active={active} panel={panel} />}
+        {showCtx && <ContextPanel active={active} panel={panel} onAddAccount={() => void addAccountForActive()} />}
       </div>
       <KeyBar />
       {modal === "account" && active && (

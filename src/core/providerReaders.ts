@@ -13,7 +13,7 @@ function readJson(file: string): any | null {
   }
 }
 
-/** Codex: $CODEX_HOME/auth.json → decode JWT id_token lấy email; hoặc "API key". */
+/** Codex: $CODEX_HOME/auth.json → decode JWT id_token. Ưu tiên TÊN hiển thị (đừng lộ email). */
 export function readCodexAccount(configDir: string): string | null {
   const j = readJson(path.join(configDir, "auth.json"));
   if (!j) return null;
@@ -22,7 +22,9 @@ export function readCodexAccount(configDir: string): string | null {
     try {
       const payload = jwt.split(".")[1];
       const o = JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
-      return o.email ?? o["https://api.openai.com/auth"]?.email ?? o.name ?? null;
+      const email: string | undefined = o.email ?? o["https://api.openai.com/auth"]?.email;
+      // Tên trước; nếu không có tên thì che email thành phần local (tránh lộ địa chỉ đầy đủ).
+      return o.name ?? (email ? email.split("@")[0] : null);
     } catch {
       /* ignore JWT lỗi */
     }

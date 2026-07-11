@@ -12,6 +12,7 @@ const CTRL_MAP: Record<string, string> = {
   KeyN: "new-project",
   KeyO: "open-folder",
   KeyS: "account-menu",
+  KeyA: "add-account",
   KeyP: "focus-projects",
 };
 

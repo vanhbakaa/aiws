@@ -2,7 +2,7 @@ import type { WebContents } from "electron";
 import { SessionManager, type Tab } from "../../session/sessionManager";
 import { getLocale } from "../../core/i18n";
 import { listProjects, openProject, removeProject } from "../../core/projects";
-import { getAccountsForProvider } from "../../core/accounts";
+import { addAccount, getAccountsForProvider } from "../../core/accounts";
 import { getProviders } from "../../core/providers";
 import { resolveCommand } from "../../core/which";
 import type { AccountInfo, CommandResult, OpenTabRequest, ProviderInfo, ProjectTree, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
@@ -162,6 +162,21 @@ export class SessionBridge {
 
   closeTab(tabId: string): void {
     this.mgr.close(tabId);
+  }
+
+  /** Add account: create a fresh oauth account slot for the provider and open a tab in its own
+   *  (empty) config dir, so the provider CLI prompts a new login. Appears in Ctrl+S after login. */
+  addAccountTab(req: OpenTabRequest): CommandResult<TabSnapshot> {
+    try {
+      const existing = getAccountsForProvider(req.providerId);
+      let n = existing.length + 1;
+      let label = `account-${n}`;
+      while (existing.some((a) => a.label === label)) label = `account-${++n}`;
+      addAccount({ providerId: req.providerId, label, authMethod: "oauth_login" });
+      return this.openTab({ ...req, account: label });
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   }
 
   /** Remove a project from the workspace: close its live terminals, then drop it from the list.

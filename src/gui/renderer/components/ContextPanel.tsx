@@ -34,7 +34,15 @@ function Meter({ pct, cls, label, caption }: { pct: number; cls: string; label: 
 
 // Live right panel, fed by the main-process poller (panel:data). Falls back to the tab snapshot's
 // account/model/effort until the first PanelSnapshot for this tab arrives.
-export function ContextPanel({ active, panel }: { active?: TabSnapshot; panel: PanelSnapshot | null }) {
+export function ContextPanel({
+  active,
+  panel,
+  onAddAccount,
+}: {
+  active?: TabSnapshot;
+  panel: PanelSnapshot | null;
+  onAddAccount?: () => void;
+}) {
   const t = useTr();
   if (!active) {
     return (
@@ -90,7 +98,10 @@ export function ContextPanel({ active, panel }: { active?: TabSnapshot; panel: P
             </div>
           )}
           <div className="actline">
-            <kbd>Ctrl+S</kbd> {t("switch")} · <kbd>Ctrl+A</kbd> {t("addAccount")}
+            <kbd>Ctrl+S</kbd> {t("switch")} ·{" "}
+            <span className="linkbtn" onClick={onAddAccount}>
+              <kbd>Ctrl+A</kbd> {t("addAccount")}
+            </span>
           </div>
         </div>
 

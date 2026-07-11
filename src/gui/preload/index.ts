@@ -9,6 +9,7 @@ const api: AiwsApi = {
   getTree: () => ipcRenderer.invoke("workspace:getTree"),
   getPanel: () => ipcRenderer.invoke("panel:get"),
   openTab: (req) => ipcRenderer.invoke("tab:open", req),
+  addAccountTab: (req) => ipcRenderer.invoke("account:add", req),
   closeTab: (tabId) => ipcRenderer.invoke("tab:close", tabId),
   setActiveTab: (index) => ipcRenderer.invoke("tab:setActive", index),
   listAccounts: (providerId) => ipcRenderer.invoke("accounts:list", providerId),

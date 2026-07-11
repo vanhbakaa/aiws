@@ -1,0 +1,44 @@
+appId: com.vanhbaka.aiws
+productName: AI Workspace
+directories:
+  output: dist-gui
+  buildResources: build
+
+# Do NOT rebuild native modules — @lydell/node-pty ships N-API prebuilds; this machine has no MSVC.
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+asar: true
+# Unpack the WHOLE @lydell tree: windowsConoutConnection.js assumes a "node_modules.asar" name and
+# conpty.dll / OpenConsole.exe / the conout worker resolve by relative path — they must live on the
+# real filesystem next to the .node binaries.
+asarUnpack:
+  - "**/node_modules/@lydell/node-pty/**"
+  - "**/node_modules/@lydell/node-pty-*/**"
+
+# App source: the built out/ + package.json. Production node_modules are added automatically by
+# electron-builder; the negations trim node-pty debug symbols (~10 MB) and sourcemaps.
+files:
+  - "out/**"
+  - "package.json"
+  - "!node_modules/@lydell/**/*.pdb"
+  - "!node_modules/@lydell/**/*.map"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: AI Workspace
+
+portable:
+  artifactName: aiws-${version}-portable.exe
+# Code signing: add win.certificateFile / CSC_LINK later. Unsigned builds trigger SmartScreen on
+# first run — document in README.

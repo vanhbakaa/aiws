@@ -1,0 +1,38 @@
+name: Release
+
+# Push a version tag (e.g. v0.2.0) to build the Windows installer and publish a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  gui-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run gui:package # electron-vite build + electron-builder --win (no MSVC: npmRebuild off)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiws-gui-windows
+          path: dist-gui/*.exe
+
+  release:
+    needs: [gui-windows]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

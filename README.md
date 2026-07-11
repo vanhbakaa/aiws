@@ -16,7 +16,7 @@ The right panel shows the live account, model, reasoning effort, context usage a
 
 ## Download
 
-Grab the latest build for your platform from the [Releases](https://github.com/vanhbakaa/aiws/releases) page. Windows ships an installer and a portable exe, macOS ships a dmg for Apple Silicon, Linux ships an AppImage and a deb.
+Grab the latest build for your platform from the [Releases](https://github.com/vanhbakaa/aiws/releases) page. Windows ships an installer and a portable exe, macOS ships a dmg for Apple Silicon, Linux ships an AppImage.
 
 The builds are not code signed. On Windows SmartScreen shows a prompt, choose More info then Run anyway. On macOS Gatekeeper blocks the first launch, right click the app and choose Open. On Linux it runs as is.
 

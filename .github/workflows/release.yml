@@ -51,9 +51,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: aiws-linux
-          path: |
-            dist-gui/*.AppImage
-            dist-gui/*.deb
+          path: dist-gui/*.AppImage
 
   release:
     needs: [gui-windows, gui-macos, gui-linux]

@@ -52,8 +52,6 @@ linux:
   target:
     - target: AppImage
       arch: [x64]
-    - target: deb
-      arch: [x64]
   category: Development
   artifactName: aiws-${version}-linux-x64.${ext}
 # Not code signed. Windows shows SmartScreen; macOS Gatekeeper blocks on first open (right click,

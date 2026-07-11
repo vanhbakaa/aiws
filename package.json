@@ -25,7 +25,7 @@
     "gui:typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "gui:build": "electron-vite build",
     "gui:preview": "electron-vite preview",
-    "gui:package": "electron-vite build && electron-builder --win --config electron-builder.yml"
+    "gui:package": "electron-vite build && electron-builder --win --config electron-builder.yml --publish never"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",

@@ -3,6 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { providerConfigDir } from "./isolation.js";
 import { getProvider } from "./providers.js";
+import { listAccounts } from "./accounts.js";
+import { accountConfigDir } from "./paths.js";
 import { latestTranscriptFile, encodeProjectDir } from "./sessionContext.js";
 import { extractClaudeMessages, type Msg } from "./handoff.js";
 import type { Project } from "./types.js";
@@ -14,7 +16,9 @@ import type { Project } from "./types.js";
 const ISO = () => new Date().toISOString();
 
 // ---------- codex ----------
-function latestCodexRollout(configDir: string): string | null {
+/** Rollout codex mới nhất trong configDir. cwd (tuỳ chọn): chỉ lấy rollout của đúng project đó —
+ *  cần thiết khi codex dùng dir GLOBAL per-account (sessions/ trộn nhiều project). */
+function latestCodexRollout(configDir: string, cwd?: string): string | null {
   const base = path.join(configDir, "sessions");
   let best: string | null = null;
   let bestM = 0;
@@ -29,7 +33,13 @@ function latestCodexRollout(configDir: string): string | null {
       const f = path.join(dir, e.name);
       if (e.isDirectory()) walk(f);
       else if (e.name.startsWith("rollout-") && e.name.endsWith(".jsonl")) {
-        const m = fs.statSync(f).mtimeMs;
+        if (cwd && !rolloutMatchesCwd(f, cwd)) continue;
+        let m: number;
+        try {
+          m = fs.statSync(f).mtimeMs;
+        } catch {
+          continue;
+        }
         if (m > bestM) {
           bestM = m;
           best = f;
@@ -39,6 +49,18 @@ function latestCodexRollout(configDir: string): string | null {
   };
   walk(base);
   return best;
+}
+
+/** Rollout thuộc project `cwd`? Đọc session_meta (dòng đầu). Không xác định được → giữ (best-effort). */
+function rolloutMatchesCwd(file: string, cwd: string): boolean {
+  const head = firstLine(file);
+  if (!head) return true;
+  try {
+    const c = (JSON.parse(head) as { payload?: { cwd?: string } }).payload?.cwd;
+    return c == null || c === cwd;
+  } catch {
+    return true;
+  }
 }
 
 /** Đọc DÒNG ĐẦU (session_meta) mà không nạp cả file — rollout thật có thể vài MB. */
@@ -102,8 +124,8 @@ function pruneUntouchedSynthSeeds(configDir: string, keepFile: string): void {
 }
 
 /** Trích hội thoại người-dùng/agent từ rollout codex (bỏ developer + <environment_context>). */
-export function extractCodexMessages(configDir: string, _cwd: string): Msg[] {
-  const file = latestCodexRollout(configDir);
+export function extractCodexMessages(configDir: string, cwd: string): Msg[] {
+  const file = latestCodexRollout(configDir, cwd || undefined);
   if (!file) return [];
   let raw: string;
   try {
@@ -135,11 +157,11 @@ export function extractCodexMessages(configDir: string, _cwd: string): Msg[] {
 
 /** Tổng hợp 1 rollout codex: CLONE scaffolding của phiên codex mới nhất + CHÈN hội thoại. Cần ≥1
  *  phiên codex thật trong project (để clone). Trả session_id mới, hoặc null nếu chưa có phiên nào. */
-export function synthesizeCodexSession(project: Project, msgs: Msg[]): string | null {
+export function synthesizeCodexSession(project: Project, msgs: Msg[], targetConfigDir?: string): string | null {
   const codex = getProvider("codex");
   if (!codex || msgs.length === 0) return null;
-  const configDir = providerConfigDir(project, codex);
-  const template = latestCodexRollout(configDir);
+  const configDir = targetConfigDir ?? providerConfigDir(project, codex);
+  const template = latestCodexRollout(configDir); // template = scaffolding bất kỳ (không lọc cwd)
   if (!template) return null;
 
   let tlines: Record<string, unknown>[];
@@ -212,10 +234,10 @@ export function synthesizeCodexSession(project: Project, msgs: Msg[]): string | 
 
 // ---------- claude ----------
 /** Tổng hợp transcript claude .jsonl từ Msg[] → trả session_id. (Best-effort; verify khi có auth.) */
-export function synthesizeClaudeSession(project: Project, msgs: Msg[]): string | null {
+export function synthesizeClaudeSession(project: Project, msgs: Msg[], targetConfigDir?: string): string | null {
   const claude = getProvider("claude");
   if (!claude || msgs.length === 0) return null;
-  const configDir = providerConfigDir(project, claude);
+  const configDir = targetConfigDir ?? providerConfigDir(project, claude);
   const cwd = project.path;
   const sid = randomUUID();
   const dir = path.join(configDir, "projects", encodeProjectDir(cwd));
@@ -243,51 +265,86 @@ export function synthesizeClaudeSession(project: Project, msgs: Msg[]): string |
 // ---------- orchestration ----------
 type Extractor = (configDir: string, cwd: string) => Msg[];
 const EXTRACTORS: Record<string, Extractor> = { claude: extractClaudeMessages, codex: extractCodexMessages };
-// Chỉ bật NATIVE cho provider đã VERIFY resume được transcript tổng hợp. codex: ĐÃ verify (BANANA42
-// + GUI). claude-as-target: synth đã có (synthesizeClaudeSession) nhưng CHƯA verify (kẹt auth) →
-// tạm để fallback soft-handoff cho an toàn; thêm vào đây khi test được claude --resume.
-const SYNTHS: Record<string, (project: Project, msgs: Msg[]) => string | null> = {
-  codex: synthesizeCodexSession,
-};
-// Cách RESUME một session theo id của từng provider.
-const RESUME_ARGS: Record<string, (id: string) => string[]> = {
-  claude: (id) => ["--resume", id],
-  codex: (id) => ["resume", id],
-};
 
-/** Hội thoại mới nhất trong project TỪ provider KHÁC target (kèm mtime để chọn cái mới nhất). */
+/** Trích hội thoại của một provider từ một config-dir cụ thể (đúng cwd). */
+export function extractMessages(providerId: string, configDir: string, cwd: string): Msg[] {
+  return EXTRACTORS[providerId]?.(configDir, cwd) ?? [];
+}
+
+/** Mọi config-dir có thể chứa hội thoại của provider trong project: dir project-scoped (env-based) +
+ *  dir GLOBAL của từng account oauth. Dùng để quét "hội thoại mới nhất" bất kể lưu ở đâu. */
+function configDirsFor(project: Project, providerId: string): string[] {
+  const provider = getProvider(providerId);
+  if (!provider) return [];
+  const dirs = [providerConfigDir(project, provider)]; // project-scoped (api_key/no-account)
+  for (const a of listAccounts(providerId)) {
+    if (a.authMethod === "oauth_login") dirs.push(accountConfigDir(a.id, providerId));
+  }
+  return dirs;
+}
+
+/**
+ * Tổng hợp session native cho provider ĐÍCH từ Msg[] rồi trả args resume.
+ * - codex → `codex resume <id>` (đã verify).
+ * - claude → ghi transcript synth vào dir cwd rồi `--continue` (nối tiếp bản mới nhất = synth, né khoá
+ *   của `--resume`). Best-effort, verify trong exe thật.
+ */
+export function synthForTarget(
+  project: Project,
+  targetProviderId: string,
+  targetConfigDir: string,
+  msgs: Msg[],
+): { sessionId: string; resumeArgs: string[]; count: number } | null {
+  if (!msgs.length) return null;
+  if (targetProviderId === "codex") {
+    const sid = synthesizeCodexSession(project, msgs, targetConfigDir);
+    return sid ? { sessionId: sid, resumeArgs: ["resume", sid], count: msgs.length } : null;
+  }
+  if (targetProviderId === "claude") {
+    const sid = synthesizeClaudeSession(project, msgs, targetConfigDir);
+    return sid ? { sessionId: sid, resumeArgs: ["--continue"], count: msgs.length } : null;
+  }
+  return null;
+}
+
+/** Hội thoại mới nhất trong project TỪ provider KHÁC target (quét mọi account dir, chọn mới nhất). */
 function latestForeign(project: Project, targetProviderId: string): { from: string; msgs: Msg[]; mtime: number } | null {
   let best: { from: string; msgs: Msg[]; mtime: number } | null = null;
-  for (const [pid, extract] of Object.entries(EXTRACTORS)) {
-    if (pid === targetProviderId) continue;
-    const provider = getProvider(pid);
-    if (!provider) continue;
-    const configDir = providerConfigDir(project, provider);
-    const file = pid === "codex" ? latestCodexRollout(configDir) : latestTranscriptFile(configDir, project.path);
-    if (!file) continue;
-    const mtime = fs.statSync(file).mtimeMs;
-    if (best && mtime <= best.mtime) continue;
-    const msgs = extract(configDir, project.path);
-    if (msgs.length) best = { from: pid, msgs, mtime };
+  for (const pid of Object.keys(EXTRACTORS)) {
+    if (pid === targetProviderId || !getProvider(pid)) continue;
+    for (const configDir of configDirsFor(project, pid)) {
+      const file = pid === "codex" ? latestCodexRollout(configDir, project.path) : latestTranscriptFile(configDir, project.path);
+      if (!file) continue;
+      let mtime: number;
+      try {
+        mtime = fs.statSync(file).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (best && mtime <= best.mtime) continue;
+      const msgs = extractMessages(pid, configDir, project.path);
+      if (msgs.length) best = { from: pid, msgs, mtime };
+    }
   }
   return best;
 }
 
 /**
  * Chuẩn bị "nạp native" cho provider đích: tìm hội thoại mới nhất từ provider khác → tổng hợp
- * session native cho đích → trả args để `--resume` nó. Null nếu không có gì hoặc chưa tổng hợp được
- * (→ caller dùng soft-handoff).
+ * session native cho đích (vào targetConfigDir) → trả args để resume. Null nếu không có gì hoặc chưa
+ * tổng hợp được (→ caller dùng soft-handoff).
  */
 export function prepareNativeCarry(
   project: Project,
   targetProviderId: string,
+  targetConfigDir?: string,
 ): { resumeArgs: string[]; sessionId: string; from: string; count: number } | null {
-  const synth = SYNTHS[targetProviderId];
-  const resume = RESUME_ARGS[targetProviderId];
-  if (!synth || !resume) return null;
   const foreign = latestForeign(project, targetProviderId);
   if (!foreign) return null;
-  const sid = synth(project, foreign.msgs);
-  if (!sid) return null;
-  return { resumeArgs: resume(sid), sessionId: sid, from: foreign.from, count: foreign.msgs.length };
+  const provider = getProvider(targetProviderId);
+  if (!provider) return null;
+  const dir = targetConfigDir ?? providerConfigDir(project, provider);
+  const carry = synthForTarget(project, targetProviderId, dir, foreign.msgs);
+  if (!carry) return null;
+  return { resumeArgs: carry.resumeArgs, sessionId: carry.sessionId, from: foreign.from, count: foreign.msgs.length };
 }

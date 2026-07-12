@@ -45,12 +45,28 @@ const S: Record<string, Entry> = {
   limit7d: { vi: "limit 7 ngày", en: "limit 7d" },
   resetCredits: { vi: "lượt reset limit còn", en: "limit resets left" },
   global: { vi: "global", en: "global" },
-  // account menu
-  switchAccountTitle: { vi: "Chuyển account", en: "Switch account" },
-  directParen: { vi: "(trực tiếp)", en: "(direct)" },
+  // accounts panel
+  accountsTitle: { vi: "Tài khoản AI", en: "AI accounts" },
   inUse: { vi: "đang dùng", en: "in use" },
-  noAccounts: { vi: "chưa có account — dùng (trực tiếp)", en: "no accounts — use (direct)" },
-  menuNav: { vi: "↑↓ chọn · ⏎ chuyển · Esc đóng", en: "↑↓ move · ⏎ switch · Esc close" },
+  defaultBadge: { vi: "mặc định", en: "default" },
+  noAccountsYet: { vi: "Chưa có tài khoản — bấm + để thêm.", en: "No accounts — click + to add." },
+  notLoggedIn: { vi: "chưa đăng nhập", en: "not logged in" },
+  useHere: { vi: "dùng ở đây", en: "use here" },
+  makeDefault: { vi: "đặt mặc định", en: "set default" },
+  rename: { vi: "đổi tên", en: "rename" },
+  remove: { vi: "xóa", en: "remove" },
+  confirmRemove: { vi: "xóa hẳn?", en: "delete?" },
+  // add-account dialog
+  addAccountTitle: { vi: "Thêm tài khoản AI", en: "Add AI account" },
+  provider: { vi: "Loại (provider)", en: "Provider" },
+  accountNameLabel: { vi: "Tên tài khoản", en: "Account name" },
+  accountNamePlaceholder: { vi: "vd: chính, phụ, work…", en: "e.g. main, personal, work…" },
+  addAccountHint: {
+    vi: "Tạo xong mở terminal để đăng nhập.",
+    en: "A login terminal opens after you create it.",
+  },
+  create: { vi: "Tạo", en: "Create" },
+  cancel: { vi: "Huỷ", en: "Cancel" },
   // providers / toasts
   notInstalledShort: { vi: "chưa cài", en: "not installed" },
   notInstalled: { vi: 'Chưa cài "{p}" — cài: {hint}', en: 'Not installed: "{p}" — install: {hint}' },

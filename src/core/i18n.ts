@@ -89,8 +89,34 @@ const DICT: Record<string, { vi: string; en: string }> = {
   // core (run.ts) switch notes
   noteCarried: { vi: 'Đã mang hội thoại đang làm sang "{label}".', en: 'Carried the current chat over to "{label}".' },
   noteNewSession: { vi: 'Mở phiên mới với "{label}".', en: 'Opened a new session with "{label}".' },
+  noteCarriedNative: {
+    vi: 'Đã nạp {count} tin nhắn từ {from} sang "{label}" (session native).',
+    en: 'Loaded {count} messages from {from} into "{label}" (native session).',
+  },
   switchedTo: { vi: "→ {label}", en: "→ {label}" },
   labelDirect: { vi: "trực tiếp", en: "direct" },
+  crossTypeOnly: {
+    vi: "Chỉ chuyển được giữa tài khoản cùng loại (claude→claude, codex→codex).",
+    en: "You can only switch between accounts of the same type (claude→claude, codex→codex).",
+  },
+  noteHandoff: {
+    vi: 'Đã lưu {count} tin nhắn từ {from} vào {file} — nhờ AI đọc để tiếp.',
+    en: 'Saved {count} messages from {from} to {file} — ask the AI to read it.',
+  },
+  switchedFresh: { vi: 'Đã chuyển sang "{label}" (phiên mới).', en: 'Switched to "{label}" (new session).' },
+  // account errors (surfaced as GUI toasts → phải song ngữ)
+  errAccountNameEmpty: { vi: "Tên tài khoản không được để trống.", en: "Account name cannot be empty." },
+  errAccountExists: {
+    vi: 'Tài khoản "{label}" đã tồn tại cho provider "{provider}".',
+    en: 'Account "{label}" already exists for provider "{provider}".',
+  },
+  errNoAccountYet: {
+    vi: 'Provider "{provider}" chưa có tài khoản. Thêm tài khoản trước khi mở terminal.',
+    en: 'Provider "{provider}" has no account yet. Add one before opening a terminal.',
+  },
+  errNoTab: { vi: "Không có tab.", en: "No tab." },
+  errNotInstalled: { vi: 'Chưa cài "{cmd}".', en: 'Not installed: "{cmd}".' },
+  errAccountNotFound: { vi: "Không tìm thấy tài khoản.", en: "Account not found." },
 };
 
 let current: Locale | null = null;

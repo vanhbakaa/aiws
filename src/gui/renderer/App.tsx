@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PanelSnapshot, ProjectTree, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
+import type { PanelSnapshot, ProjectTree, ProviderInfo, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
 import { TerminalRegistry } from "./term/TerminalRegistry";
 import { TabBar } from "./components/TabBar";
 import { ProjectsPanel } from "./components/ProjectsPanel";
 import { TerminalPane } from "./components/TerminalPane";
 import { ContextPanel } from "./components/ContextPanel";
 import { KeyBar } from "./components/KeyBar";
-import { AccountMenu } from "./components/AccountMenu";
+import { AccountsPanel } from "./components/AccountsPanel";
+import { AddAccountDialog } from "./components/AddAccountDialog";
 import { LocaleContext, tr, type Locale } from "./i18n";
 
 const aiws = window.aiws;
@@ -20,7 +21,9 @@ export function App() {
   const [provider, setProvider] = useState("shell");
   const [locale, setLoc] = useState<Locale>("vi");
   const [showCtx, setShowCtx] = useState(true);
-  const [modal, setModal] = useState<"account" | null>(null);
+  const [modal, setModal] = useState<"accounts" | "add-account" | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [addProvider, setAddProvider] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; kind: string } | null>(null);
   const [leftW, setLeftW] = useState(() => clampW(Number(localStorage.getItem("aiws.leftW")) || 202, 160, 420));
   const [rightW, setRightW] = useState(() => clampW(Number(localStorage.getItem("aiws.rightW")) || 258, 190, 520));
@@ -38,6 +41,10 @@ export function App() {
   const reg = registryRef.current;
   const hostRef = useRef<HTMLDivElement>(null);
   const booted = useRef(false);
+  const initProjRef = useRef<string | null>(null);
+  const providersRef = useRef<ProviderInfo[]>(providers);
+  providersRef.current = providers;
+  const pendingProjRef = useRef<string | null>(null); // project chờ mở terminal sau khi thêm+login tk
 
   // side-panel widths (persisted) + splitter drag state
   const leftWRef = useRef(leftW);
@@ -64,9 +71,23 @@ export function App() {
   localeRef.current = locale;
 
   const openProjectTab = useCallback(
-    async (projectName: string, providerId: string) => {
+    async (projectName: string, providerId: string, account?: string) => {
+      // Provider cần account mà CHƯA có tài khoản nào (và không chỉ định sẵn) → mở hộp thoại thêm +
+      // đăng nhập luôn, thay vì mở terminal rồi báo lỗi "chưa có tài khoản".
+      if (!account) {
+        const prov = providersRef.current.find((p) => p.id === providerId);
+        if (prov?.hasAccounts) {
+          const accts = await aiws.listAllAccounts();
+          if (!accts.some((a) => a.providerId === providerId)) {
+            pendingProjRef.current = projectName;
+            setAddProvider(providerId);
+            setModal("add-account");
+            return;
+          }
+        }
+      }
       const { cols, rows, prepId } = reg.prepare();
-      const res = await aiws.openTab({ projectName, providerId, cols, rows });
+      const res = await aiws.openTab({ projectName, providerId, cols, rows, account });
       if (!res.ok) {
         reg.discardPrepared(prepId);
         // Localize the common "not installed" case in the renderer (bridge errors are Vietnamese).
@@ -92,20 +113,35 @@ export function App() {
     if (r.ok) await openProjectTab(r.value.projectName, providerRef.current);
   }, [openProjectTab]);
 
-  // Add account: open a fresh-login tab for the active AI tab's provider (new isolated account slot).
-  const addAccountForActive = useCallback(async () => {
+  // Open the "add account" dialog. Default provider = active AI tab's provider, else the tab-bar pick.
+  const openAddAccount = useCallback((providerId?: string) => {
     const act = snapRef.current.tabs[snapRef.current.active];
-    if (!act || act.providerId === "shell") return;
-    const { cols, rows, prepId } = reg.prepare();
-    const res = await aiws.addAccountTab({ projectName: act.projectName, providerId: act.providerId, cols, rows });
-    if (!res.ok) {
-      reg.discardPrepared(prepId);
-      setToast({ msg: res.error, kind: "error" });
-      window.setTimeout(() => setToast(null), 5000);
-      return;
-    }
-    reg.adopt(res.value.id, prepId);
-  }, [reg]);
+    const def = providerId ?? (act && act.providerId !== "shell" ? act.providerId : providerRef.current);
+    pendingProjRef.current = null; // thêm tk thủ công → login vào project hiện tại, không dùng pending cũ
+    setAddProvider(def && def !== "shell" ? def : undefined);
+    setModal("add-account");
+  }, []);
+
+  // Create an account slot, then open a login terminal for it in some project (active → tree → init).
+  const createAndLogin = useCallback(
+    async (providerId: string, label: string) => {
+      setModal(null);
+      const res = await aiws.createAccount(providerId, label);
+      if (!res.ok) {
+        setToast({ msg: res.error, kind: "error" });
+        window.setTimeout(() => setToast(null), 5000);
+        return;
+      }
+      const projName =
+        pendingProjRef.current ??
+        snapRef.current.tabs[snapRef.current.active]?.projectName ??
+        treeRef.current[0]?.name ??
+        initProjRef.current;
+      pendingProjRef.current = null;
+      if (projName) await openProjectTab(projName, providerId, res.value.label);
+    },
+    [openProjectTab],
+  );
 
   // wiring: events + initial hydrate + bootstrap the initial project's tab
   useEffect(() => {
@@ -135,11 +171,11 @@ export function App() {
           if (Number.isInteger(i) && i >= 0 && i < s.tabs.length) aiws.setActiveTab(i);
           break;
         }
-        case "account-menu":
-          if (act && act.providerId !== "shell") setModal("account");
+        case "accounts":
+          setModal("accounts"); // global panel — works even with no project open
           break;
         case "add-account":
-          void addAccountForActive();
+          openAddAccount();
           break;
         case "open-folder":
         case "new-project":
@@ -171,14 +207,24 @@ export function App() {
     });
 
     (async () => {
-      const [s, t, pnl, init] = await Promise.all([aiws.getState(), aiws.getTree(), aiws.getPanel(), aiws.getInit()]);
+      const [s, t, pnl, init, provs] = await Promise.all([
+        aiws.getState(),
+        aiws.getTree(),
+        aiws.getPanel(),
+        aiws.getInit(),
+        aiws.listProviders(),
+      ]);
       setSnap(s);
       setTree(t);
       setPanel(pnl);
       setLoc(s.locale as Locale);
       setProvider(init.providerId);
+      setProviders(provs);
+      providersRef.current = provs; // để openProjectTab thấy ngay ở boot (state chưa kịp re-render)
+      initProjRef.current = init.projectName;
       if (s.tabs.length === 0 && init.projectName && !booted.current) {
         booted.current = true;
+        // openProjectTab tự lo: provider chưa có tài khoản → mở hộp thoại thêm+login; đã có → mở tab.
         await openProjectTab(init.projectName, init.providerId);
       }
     })();
@@ -195,7 +241,7 @@ export function App() {
       offStatus();
       window.removeEventListener("resize", onResize);
     };
-  }, [reg, openProjectTab, openFolder, toggleLang, addAccountForActive]);
+  }, [reg, openProjectTab, openFolder, toggleLang, openAddAccount]);
 
   // vertical splitter drag: window-level listeners so tracking survives over the terminal canvas
   useEffect(() => {
@@ -267,14 +313,28 @@ export function App() {
         <div className="gutter" onMouseDown={startDrag("left")} />
         <TerminalPane ref={hostRef} active={active} hasTabs={snap.tabs.length > 0} onOpenFolder={() => void openFolder()} />
         {showCtx && <div className="gutter" onMouseDown={startDrag("right")} />}
-        {showCtx && <ContextPanel active={active} panel={panel} onAddAccount={() => void addAccountForActive()} />}
+        {showCtx && (
+          <ContextPanel
+            active={active}
+            panel={panel}
+            onOpenAccounts={() => setModal("accounts")}
+            onAddAccount={() => openAddAccount()}
+          />
+        )}
       </div>
       <KeyBar />
-      {modal === "account" && active && (
-        <AccountMenu
-          tab={active}
-          onClose={() => setModal(null)}
-          onSwitch={(toLabel, toDirect) => aiws.switchAccount(active.id, toLabel, toDirect)}
+      {modal === "accounts" && (
+        <AccountsPanel activeTab={active} onAdd={(pid) => openAddAccount(pid)} onClose={() => setModal(null)} />
+      )}
+      {modal === "add-account" && (
+        <AddAccountDialog
+          providers={providers}
+          defaultProvider={addProvider}
+          onCreate={(pid, label) => void createAndLogin(pid, label)}
+          onClose={() => {
+            pendingProjRef.current = null; // huỷ hộp thoại → bỏ project đang chờ login
+            setModal(null);
+          }}
         />
       )}
       {toast && (

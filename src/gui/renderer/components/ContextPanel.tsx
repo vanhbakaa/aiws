@@ -1,46 +1,19 @@
-import type { PanelSnapshot, TabSnapshot, UsageWindowDTO } from "../../shared/contract";
+import type { PanelSnapshot, TabSnapshot } from "../../shared/contract";
 import { kfmt } from "./util";
+import { Meter, UsageBars } from "./usage";
 import { useTr } from "../i18n";
-
-/** Compact "time until reset" (e.g. 45m / 4h / 3d) from an ISO timestamp. */
-function untilReset(iso?: string): string | null {
-  if (!iso) return null;
-  const ms = new Date(iso).getTime() - Date.now();
-  if (!isFinite(ms) || ms <= 0) return null;
-  const h = Math.floor(ms / 3_600_000);
-  if (h < 1) return `${Math.max(1, Math.round(ms / 60_000))}m`;
-  if (h < 48) return `${h}h`;
-  return `${Math.round(h / 24)}d`;
-}
-function usageCap(w: UsageWindowDTO): string {
-  const r = untilReset(w.resetsAt);
-  return `${w.pct}%` + (r ? ` · ↻ ${r}` : "");
-}
-
-function Meter({ pct, cls, label, caption }: { pct: number; cls: string; label: string; caption?: string }) {
-  const w = Math.min(100, Math.max(0, pct));
-  return (
-    <div className="meter">
-      <div className="track">
-        <div className={cls} style={{ width: w + "%" }} />
-      </div>
-      <div className="cap">
-        <span>{label}</span>
-        <span>{caption ?? pct + "%"}</span>
-      </div>
-    </div>
-  );
-}
 
 // Live right panel, fed by the main-process poller (panel:data). Falls back to the tab snapshot's
 // account/model/effort until the first PanelSnapshot for this tab arrives.
 export function ContextPanel({
   active,
   panel,
+  onOpenAccounts,
   onAddAccount,
 }: {
   active?: TabSnapshot;
   panel: PanelSnapshot | null;
+  onOpenAccounts?: () => void;
   onAddAccount?: () => void;
 }) {
   const t = useTr();
@@ -49,7 +22,15 @@ export function ContextPanel({
       <div className="col right">
         <div className="collabel">{t("context")}</div>
         <div className="sect">
-          <div className="muted">—</div>
+          <div className="acct-line linkbtn" onClick={onOpenAccounts}>
+            <span className="dot" style={{ background: "var(--muted, #888)" }} />
+            <span className="who2">{t("accountsTitle")}</span>
+          </div>
+          <div className="actline">
+            <span className="linkbtn" onClick={onAddAccount}>
+              <kbd>Ctrl+A</kbd> {t("addAccount")}
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -71,34 +52,17 @@ export function ContextPanel({
       <div className="scroll">
         <div className="sect">
           <div className="slabel">{t("aiAccount")}</div>
-          <div className="acct-line">
+          <div className="acct-line linkbtn" onClick={onOpenAccounts} title={t("accountsTitle")}>
             <span className="dot" style={{ background: "var(--green)" }} />
-            <span className="who2">{p?.account ?? active.accountLabel ?? t("direct")}</span>
+            <span className="who2">{p?.account ?? active.accountLabel ?? "—"}</span>
           </div>
           {p?.accountType && <div className="acct-type">{p.accountType}</div>}
-          {p?.usage?.fiveHour && (
-            <Meter
-              pct={p.usage.fiveHour.pct}
-              cls={p.usage.fiveHour.pct >= 50 ? "fill" : "fill ok"}
-              label={t("limit5h")}
-              caption={usageCap(p.usage.fiveHour)}
-            />
-          )}
-          {p?.usage?.sevenDay && (
-            <Meter
-              pct={p.usage.sevenDay.pct}
-              cls={p.usage.sevenDay.pct >= 50 ? "fill" : "fill ok"}
-              label={t("limit7d")}
-              caption={usageCap(p.usage.sevenDay)}
-            />
-          )}
-          {typeof p?.usage?.resetCredits === "number" && (
-            <div className="resetline">
-              {t("resetCredits")}: <b>{p.usage.resetCredits}</b>
-            </div>
-          )}
+          <UsageBars usage={p?.usage ?? null} />
           <div className="actline">
-            <kbd>Ctrl+S</kbd> {t("switch")} ·{" "}
+            <span className="linkbtn" onClick={onOpenAccounts}>
+              <kbd>Ctrl+S</kbd> {t("accountsTitle")}
+            </span>{" "}
+            ·{" "}
             <span className="linkbtn" onClick={onAddAccount}>
               <kbd>Ctrl+A</kbd> {t("addAccount")}
             </span>

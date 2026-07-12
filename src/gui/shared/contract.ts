@@ -78,8 +78,20 @@ export interface PanelSnapshot {
 }
 
 export interface AccountInfo {
+  id: string;
+  providerId: string;
   label: string;
+  authMethod: string;
   isDefault?: boolean;
+}
+
+/** Per-account detail read from its GLOBAL config dir (no terminal needed). */
+export interface AccountDetail {
+  loggedIn: boolean;
+  accountName: string | null;
+  accountType: string | null;
+  model: string | null;
+  usage: { fiveHour?: UsageWindowDTO; sevenDay?: UsageWindowDTO; resetCredits?: number } | null;
 }
 
 export interface ProviderInfo {
@@ -101,12 +113,17 @@ export interface AiwsApi {
   getTree(): Promise<ProjectTree>;
   getPanel(): Promise<PanelSnapshot>;
   openTab(req: OpenTabRequest): Promise<CommandResult<TabSnapshot>>;
-  addAccountTab(req: OpenTabRequest): Promise<CommandResult<TabSnapshot>>;
   closeTab(tabId: string): Promise<void>;
   setActiveTab(index: number): Promise<void>;
-  listAccounts(providerId: string): Promise<AccountInfo[]>;
   listProviders(): Promise<ProviderInfo[]>;
-  switchAccount(tabId: string, toLabel?: string, toDirect?: boolean): Promise<{ ok: boolean; msg: string }>;
+  // account management (global panel)
+  listAllAccounts(): Promise<AccountInfo[]>;
+  accountInfo(accountId: string): Promise<AccountDetail>;
+  createAccount(providerId: string, label: string): Promise<CommandResult<AccountInfo>>;
+  removeAccount(accountId: string): Promise<{ ok: boolean; error?: string }>;
+  renameAccount(accountId: string, label: string): Promise<{ ok: boolean; error?: string }>;
+  setDefaultAccount(accountId: string): Promise<{ ok: boolean; error?: string }>;
+  switchAccount(tabId: string, toAccountId: string): Promise<{ ok: boolean; msg: string }>;
   openFolderDialog(): Promise<CommandResult<{ projectName: string }>>;
   removeProject(name: string): Promise<{ ok: boolean; error?: string }>;
   reopenProject(path: string): Promise<CommandResult<{ projectName: string }>>;

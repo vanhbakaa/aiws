@@ -107,3 +107,19 @@ export function writeHandoff(project: Project, forProviderId: string): { file: s
   }
   return { file: ".aiws-handoff.md", from: conv.providerId, count: conv.msgs.length };
 }
+
+/** Ghi handoff .md từ Msg[] đã có sẵn (dùng khi switch khác loại không tổng hợp được native). */
+export function writeHandoffFromMsgs(
+  project: Project,
+  fromProviderId: string,
+  msgs: Msg[],
+): { file: string; from: string; count: number } | null {
+  if (!msgs.length) return null;
+  const file = path.join(project.path, ".aiws-handoff.md");
+  try {
+    fs.writeFileSync(file, render({ providerId: fromProviderId, msgs }), "utf8");
+  } catch {
+    return null;
+  }
+  return { file: ".aiws-handoff.md", from: fromProviderId, count: msgs.length };
+}

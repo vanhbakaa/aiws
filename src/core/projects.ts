@@ -52,6 +52,25 @@ export function updateTerminalAccount(projectId: string, terminalId: string, acc
   saveWorkspace(ws);
 }
 
+/**
+ * Cập nhật terminal khi CHUYỂN KHÁC LOẠI (provider khác): phải lưu cả providerId + account + session,
+ * nếu không lần switch sau đọc providerId cũ (đã lệch) → định tuyến sai config-dir → mất hội thoại.
+ */
+export function updateTerminal(
+  projectId: string,
+  terminalId: string,
+  patch: { providerId?: string; aiAccountId?: string; sessionId?: string },
+): void {
+  const ws = loadWorkspace();
+  const p = ws.projects.find((x) => x.id === projectId);
+  const t = p?.terminals.find((x) => x.id === terminalId);
+  if (!t) throw new Error(`Không tìm thấy terminal id "${terminalId}"`);
+  if (patch.providerId !== undefined) t.providerId = patch.providerId;
+  if ("aiAccountId" in patch) t.aiAccountId = patch.aiAccountId;
+  if ("sessionId" in patch) t.sessionId = patch.sessionId;
+  saveWorkspace(ws);
+}
+
 /** Sinh tên không trùng: "name" → "name-2" → "name-3"... */
 function uniqueName(existing: Project[], base: string): string {
   const names = new Set(existing.map((p) => p.name));

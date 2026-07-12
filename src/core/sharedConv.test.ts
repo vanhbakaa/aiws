@@ -22,7 +22,7 @@ function proj(id: string): Project {
 }
 
 describe("shared conversations", () => {
-  it("CÙNG provider, KHÁC account (oauth) → transcript dùng chung + đọc chéo được", () => {
+  it("oauth account → config-dir GLOBAL riêng, KHÔNG junction (switch mang chat qua carryTranscript)", () => {
     const claude = getProvider("claude")!;
     const a = addAccount({ providerId: "claude", label: "a", authMethod: "oauth_login" });
     const b = addAccount({ providerId: "claude", label: "b", authMethod: "oauth_login" });
@@ -31,15 +31,11 @@ describe("shared conversations", () => {
     const ra = buildIsolatedEnv(p, claude, a);
     const rb = buildIsolatedEnv(p, claude, b);
 
-    // config-dir (auth) KHÁC nhau
+    // mỗi account 1 dir global riêng (auth + history tách bạch)
     expect(ra.configDir).not.toBe(rb.configDir);
-    // nhưng projects/ trỏ CÙNG kho chung
-    expect(fs.realpathSync(path.join(ra.configDir, "projects"))).toBe(
-      fs.realpathSync(path.join(rb.configDir, "projects")),
-    );
-    // ghi qua A → đọc được qua B
-    fs.writeFileSync(path.join(ra.configDir, "projects", "s1.jsonl"), "hi");
-    expect(fs.existsSync(path.join(rb.configDir, "projects", "s1.jsonl"))).toBe(true);
+    // KHÔNG junction "projects" → không trói toàn bộ history của account vào một project
+    const pj = path.join(ra.configDir, "projects");
+    if (fs.existsSync(pj)) expect(fs.lstatSync(pj).isSymbolicLink()).toBe(false);
   });
 
   it("KHÁC provider (claude vs codex) → KHÔNG chia sẻ", () => {
@@ -51,18 +47,17 @@ describe("shared conversations", () => {
     );
   });
 
-  it("GỘP transcript cũ (dir thật) vào kho chung, không mất dữ liệu", () => {
+  it("GỘP transcript cũ (dir thật project-scoped) vào kho chung, không mất dữ liệu", () => {
     const claude = getProvider("claude")!;
-    const a = addAccount({ providerId: "claude", label: "a", authMethod: "oauth_login" });
     const p = proj("p");
-    // giả lập account A đã có transcript THẬT trước khi chia sẻ
-    const dirA = providerConfigDir(p, claude, a);
-    fs.mkdirSync(path.join(dirA, "projects"), { recursive: true });
-    fs.writeFileSync(path.join(dirA, "projects", "old.jsonl"), "old");
+    // dir project-scoped (env-based/no-account) đã có transcript THẬT trước khi chia sẻ
+    const dir = providerConfigDir(p, claude); // profiles/p/claude
+    fs.mkdirSync(path.join(dir, "projects"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "projects", "old.jsonl"), "old");
 
-    const ra = buildIsolatedEnv(p, claude, a);
-    expect(fs.lstatSync(path.join(ra.configDir, "projects")).isSymbolicLink()).toBe(true);
-    expect(fs.readFileSync(path.join(ra.configDir, "projects", "old.jsonl"), "utf8")).toBe("old");
+    const r = buildIsolatedEnv(p, claude); // no account → junction áp dụng
+    expect(fs.lstatSync(path.join(r.configDir, "projects")).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(r.configDir, "projects", "old.jsonl"), "utf8")).toBe("old");
   });
 
   it("shareConversations=false → giữ thư mục thật, không junction", () => {

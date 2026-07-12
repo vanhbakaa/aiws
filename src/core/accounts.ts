@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { loadWorkspace, saveWorkspace } from "./storage.js";
 import { deleteSecret, getSecret, setSecret, type AccountSecret } from "./secrets.js";
+import { t } from "./i18n.js";
 import type { AiAccount, AuthMethod, Provider } from "./types.js";
 
 export interface AddAccountInput {
@@ -27,7 +28,7 @@ export function getAccountById(id: string): AiAccount | undefined {
 export function addAccount(input: AddAccountInput): AiAccount {
   const ws = loadWorkspace();
   if (ws.aiAccounts.some((a) => a.providerId === input.providerId && a.label === input.label)) {
-    throw new Error(`Account "${input.label}" đã tồn tại cho provider "${input.providerId}"`);
+    throw new Error(t("errAccountExists", { label: input.label, provider: input.providerId }));
   }
   const id = randomUUID();
   const account: AiAccount = {
@@ -62,6 +63,34 @@ export function removeAccount(providerId: string, label: string): boolean {
   saveWorkspace(ws);
   deleteSecret(acct.id);
   return true;
+}
+
+/** Đổi tên (label) account theo id. Không cho trùng label trong cùng provider. */
+export function renameAccount(id: string, label: string): void {
+  const ws = loadWorkspace();
+  const acc = ws.aiAccounts.find((a) => a.id === id);
+  if (!acc) throw new Error(t("errAccountNotFound"));
+  const clean = label.trim();
+  if (!clean) throw new Error(t("errAccountNameEmpty"));
+  if (ws.aiAccounts.some((a) => a.id !== id && a.providerId === acc.providerId && a.label === clean)) {
+    throw new Error(t("errAccountExists", { label: clean, provider: acc.providerId }));
+  }
+  acc.label = clean;
+  saveWorkspace(ws);
+}
+
+/** Xoá account theo id (kèm cập nhật default). Trả false nếu không tồn tại. */
+export function removeAccountById(id: string): boolean {
+  const acc = getAccountById(id);
+  if (!acc) return false;
+  return removeAccount(acc.providerId, acc.label);
+}
+
+/** Đặt account (theo id) làm mặc định cho provider của nó. */
+export function setDefaultAccountById(id: string): void {
+  const acc = getAccountById(id);
+  if (!acc) throw new Error(`Không tìm thấy account id "${id}"`);
+  setDefaultAccount(acc.providerId, acc.label);
 }
 
 export function setDefaultAccount(providerId: string, label: string): void {

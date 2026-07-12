@@ -9,6 +9,7 @@ import { registerIpc } from "./ipc";
 import { registerShortcuts } from "./shortcuts";
 import { buildMenu } from "./menu";
 import { attachDevDiagnostics } from "./devDiag";
+import { initAutoUpdate } from "./updater";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 let bridge: SessionBridge | undefined;
@@ -110,6 +111,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     buildMenu(menuGetWin);
     createWindow();
+    initAutoUpdate(menuGetWin); // tự kiểm tra + tải bản cập nhật (chỉ khi đã đóng gói)
   });
 }
 

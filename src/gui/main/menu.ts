@@ -46,7 +46,10 @@ export function buildMenu(getWin: () => BrowserWindow | null): void {
     },
     {
       label: "Account",
-      submenu: [item("Switch…", "CmdOrCtrl+S", "account-menu")],
+      submenu: [
+        item("Accounts…", "CmdOrCtrl+S", "accounts"),
+        item("Add Account…", "CmdOrCtrl+A", "add-account"),
+      ],
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));

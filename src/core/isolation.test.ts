@@ -62,14 +62,31 @@ describe("isolation", () => {
     expect(r2.env.ANTHROPIC_API_KEY).toBe("KEY_B");
   });
 
-  it("oauth_login → config dir RIÊNG theo account", () => {
+  it("oauth_login → config dir GLOBAL theo account (login dùng chung mọi project)", () => {
     const claude = getProvider("claude")!;
     const a1 = addAccount({ providerId: "claude", label: "acc1", authMethod: "oauth_login" });
     const a2 = addAccount({ providerId: "claude", label: "acc2", authMethod: "oauth_login" });
     const d1 = providerConfigDir(proj("p"), claude, a1);
     const d2 = providerConfigDir(proj("p"), claude, a2);
-    expect(d1).not.toBe(d2);
-    expect(d1).toContain(a1.id);
+    expect(d1).not.toBe(d2); // khác account → khác dir
+    expect(d1).toContain(path.join("accounts", a1.id, "claude"));
+    // CÙNG account, KHÁC project → CÙNG dir → không phải login lại khi đổi project
+    expect(providerConfigDir(proj("p1"), claude, a1)).toBe(providerConfigDir(proj("p2"), claude, a1));
+  });
+
+  it("di trú login+lịch sử cũ (per-project) sang dir global lần đầu (không mất chat/đăng nhập)", () => {
+    const claude = getProvider("claude")!;
+    const a = addAccount({ providerId: "claude", label: "a", authMethod: "oauth_login" });
+    // giả lập scheme CŨ: profiles/<projId>/claude__<accId>/{.credentials.json, projects/enc/s.jsonl}
+    const legacy = path.join(tmp, "profiles", "projX", `claude__${a.id}`);
+    fs.mkdirSync(path.join(legacy, "projects", "enc"), { recursive: true });
+    fs.writeFileSync(path.join(legacy, ".credentials.json"), "{}");
+    fs.writeFileSync(path.join(legacy, "projects", "enc", "s.jsonl"), "x");
+
+    const { configDir } = buildIsolatedEnv(proj("p"), claude, a);
+    expect(configDir).toContain(path.join("accounts", a.id, "claude"));
+    expect(fs.existsSync(path.join(configDir, ".credentials.json"))).toBe(true); // login được mang sang
+    expect(fs.existsSync(path.join(configDir, "projects", "enc", "s.jsonl"))).toBe(true); // lịch sử được mang sang
   });
 
   it("KHÁC provider trong CÙNG project (claude vs codex) → config dir khác → session KHÔNG chia sẻ", () => {

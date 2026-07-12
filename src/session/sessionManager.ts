@@ -149,25 +149,28 @@ export class SessionManager {
   }
 
   /**
-   * Hot-switch account của tab: đổi account rồi thay session (relaunch + mang hội thoại).
-   * toLabel = account cụ thể; toDirect = về đăng nhập trực tiếp; bỏ trống = luân phiên kế tiếp.
+   * Hot-switch account của tab: đổi sang account (theo id — có thể KHÁC LOẠI) rồi thay session
+   * (relaunch + mang hội thoại). toAccountId = account cụ thể; toLabel = theo nhãn (cùng provider);
+   * bỏ trống = luân phiên kế tiếp cùng provider.
    */
-  switchAccount(tabId: string, toLabel?: string, toDirect?: boolean): { ok: boolean; msg: string } {
+  switchAccount(tabId: string, toAccountId?: string, toLabel?: string): { ok: boolean; msg: string } {
     const tab = this.tabs.find((t) => t.id === tabId);
-    if (!tab) return { ok: false, msg: "không có tab" };
+    if (!tab) return { ok: false, msg: t("errNoTab") };
     let spec;
     try {
-      spec = prepareSwitch(tab.projectName, tab.title, toDirect ? { toDirect: true } : toLabel ? { toLabel } : undefined);
+      spec = prepareSwitch(tab.projectName, tab.title, toAccountId ? { toAccountId } : toLabel ? { toLabel } : undefined);
     } catch (e) {
       return { ok: false, msg: (e as Error).message };
     }
+    const providerChanged = spec.providerId !== tab.providerId;
     const args = [...spec.args];
-    if (tab.providerId === "claude") {
+    // model/effort là theo provider → chỉ giữ khi KHÔNG đổi loại provider.
+    if (!providerChanged && spec.providerId === "claude") {
       if (tab.model) args.push("--model", tab.model);
       if (tab.effort) args.push("--effort", tab.effort);
     }
     const fa = ptyFileArgs(spec.cmd, args);
-    if (!fa) return { ok: false, msg: `chưa cài "${spec.cmd}"` };
+    if (!fa) return { ok: false, msg: t("errNotInstalled", { cmd: spec.cmd }) };
     const cols = tab.session.cols;
     const rows = tab.session.rows;
     tab.session.kill();
@@ -178,12 +181,17 @@ export class SessionManager {
       if (tab.session === session) this.close(tab.id);
     });
     tab.session = session;
+    tab.providerId = spec.providerId; // đổi khác loại → cập nhật cả provider của tab
+    if (providerChanged) {
+      tab.model = undefined; // model/effort cũ thuộc provider cũ → reset, poller sẽ đọc lại của đích
+      tab.effort = undefined;
+    }
     tab.accountLabel = spec.accountLabel;
     tab.configDir = spec.configDir;
     tab.sessionId = spec.terminal.sessionId;
     this.sessionsVersion++; // session mới → App phải đăng ký lại onUpdate (nếu không sẽ chỉ update mỗi 2s)
     this.emit();
-    return { ok: true, msg: spec.note ?? t("switchedTo", { label: spec.accountLabel ?? t("labelDirect") }) };
+    return { ok: true, msg: spec.note ?? t("switchedTo", { label: spec.accountLabel ?? "" }) };
   }
 
   setActive(i: number): void {

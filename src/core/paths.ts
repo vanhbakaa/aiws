@@ -24,3 +24,22 @@ export function profilesDir(): string {
 export function projectProfileDir(projectId: string): string {
   return path.join(profilesDir(), projectId);
 }
+
+/** Nơi chứa config-dir GLOBAL của từng account (login dùng chung mọi project). */
+export function accountsDir(): string {
+  return path.join(aiwsHome(), "accounts");
+}
+
+/** Thư mục gốc của một account: `~/.aiws/accounts/<accountId>` (xoá = quên login của account). */
+export function accountDir(accountId: string): string {
+  return path.join(accountsDir(), accountId);
+}
+
+/**
+ * Config-dir global của một account cho một provider: `~/.aiws/accounts/<accountId>/<providerId>`.
+ * Cùng account = cùng dir ở MỌI project → login (oauth) dùng chung. Session vẫn tách theo project
+ * nhờ cwd (claude: `projects/<encode(cwd)>`; codex: lọc theo `session_meta.cwd`).
+ */
+export function accountConfigDir(accountId: string, providerId: string): string {
+  return path.join(accountDir(accountId), providerId);
+}

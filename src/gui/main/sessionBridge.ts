@@ -1,11 +1,23 @@
 import type { WebContents } from "electron";
+import fs from "node:fs";
 import { SessionManager, type Tab } from "../../session/sessionManager";
-import { getLocale } from "../../core/i18n";
+import { getLocale, t } from "../../core/i18n";
 import { listProjects, openProject, removeProject } from "../../core/projects";
-import { addAccount, getAccountsForProvider } from "../../core/accounts";
+import {
+  addAccount,
+  getAccountById,
+  listAccounts,
+  removeAccountById,
+  renameAccount,
+  setDefaultAccountById,
+} from "../../core/accounts";
 import { getProviders } from "../../core/providers";
+import { accountConfigDir, accountDir } from "../../core/paths";
+import { readAccountFor, readAccountTypeFor } from "../../core/providerInfo";
+import { getClaudeUsage } from "../../core/usage";
+import { getCodexLiveUsage, getCodexUsage } from "../../core/providerReaders";
 import { resolveCommand } from "../../core/which";
-import type { AccountInfo, CommandResult, OpenTabRequest, ProviderInfo, ProjectTree, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
+import type { AccountDetail, AccountInfo, CommandResult, OpenTabRequest, ProviderInfo, ProjectTree, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
 
 // How to install each provider's CLI (shown in the dropdown + error toast when it's missing).
 const INSTALL_HINTS: Record<string, string> = {
@@ -164,16 +176,13 @@ export class SessionBridge {
     this.mgr.close(tabId);
   }
 
-  /** Add account: create a fresh oauth account slot for the provider and open a tab in its own
-   *  (empty) config dir, so the provider CLI prompts a new login. Appears in Ctrl+S after login. */
-  addAccountTab(req: OpenTabRequest): CommandResult<TabSnapshot> {
+  /** Create an account slot (metadata only, oauth). Caller then opens a login tab via openTab. */
+  createAccount(providerId: string, label: string): CommandResult<AccountInfo> {
     try {
-      const existing = getAccountsForProvider(req.providerId);
-      let n = existing.length + 1;
-      let label = `account-${n}`;
-      while (existing.some((a) => a.label === label)) label = `account-${++n}`;
-      addAccount({ providerId: req.providerId, label, authMethod: "oauth_login" });
-      return this.openTab({ ...req, account: label });
+      const clean = label.trim();
+      if (!clean) return { ok: false, error: t("errAccountNameEmpty") };
+      const a = addAccount({ providerId, label: clean, authMethod: "oauth_login" });
+      return { ok: true, value: { id: a.id, providerId: a.providerId, label: a.label, authMethod: a.authMethod, isDefault: a.isDefault } };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
     }
@@ -209,8 +218,92 @@ export class SessionBridge {
     this.mgr.setActive(index);
   }
 
-  listAccounts(providerId: string): AccountInfo[] {
-    return getAccountsForProvider(providerId).map((a) => ({ label: a.label, isDefault: a.isDefault }));
+  listAllAccounts(): AccountInfo[] {
+    return listAccounts().map((a) => ({
+      id: a.id,
+      providerId: a.providerId,
+      label: a.label,
+      authMethod: a.authMethod,
+      isDefault: a.isDefault,
+    }));
+  }
+
+  /** Per-account detail read straight from its GLOBAL config dir — no terminal required. */
+  async accountInfo(accountId: string): Promise<AccountDetail> {
+    const empty: AccountDetail = { loggedIn: false, accountName: null, accountType: null, model: null, usage: null };
+    const acc = getAccountById(accountId);
+    if (!acc) return empty;
+    const configDir = accountConfigDir(acc.id, acc.providerId);
+    if (!fs.existsSync(configDir)) return empty; // chưa login lần nào → dir chưa tồn tại
+    const accountName = readAccountFor(acc.providerId, configDir);
+    const accountType = readAccountTypeFor(acc.providerId, configDir);
+    // model KHÔNG đọc ở đây: nó là thiết lập theo phiên/cwd, không tra được cho panel account toàn cục
+    // (readModelFor cần cwd) → luôn null; model hiển thị ở panel PHẢI của tab đang chạy.
+    let usage: AccountDetail["usage"] = null;
+    try {
+      if (acc.providerId === "claude") usage = await getClaudeUsage(configDir);
+      else if (acc.providerId === "codex") usage = (await getCodexLiveUsage(configDir)) ?? getCodexUsage(configDir);
+    } catch {
+      usage = null;
+    }
+    return { loggedIn: accountName != null || accountType != null, accountName, accountType, model: null, usage };
+  }
+
+  /** Surface a failed mutation as a toast (App listens to onStatus) so panel actions never fail silently. */
+  private fail(msg: string): { ok: false; error: string } {
+    this.send("status", { message: msg, kind: "error" });
+    return { ok: false, error: msg };
+  }
+
+  /** Remove an account: close its live tabs, forget metadata + delete its GLOBAL login dir. */
+  removeAccount(accountId: string): { ok: boolean; error?: string } {
+    try {
+      const acc = getAccountById(accountId);
+      if (!acc) return this.fail(t("errAccountNotFound"));
+      const dir = accountConfigDir(acc.id, acc.providerId);
+      for (const t of this.mgr.tabs.filter((t) => t.configDir === dir)) this.mgr.close(t.id);
+      removeAccountById(accountId);
+      try {
+        fs.rmSync(accountDir(accountId), { recursive: true, force: true });
+      } catch {
+        /* login dir may be locked/open — metadata already gone, ignore */
+      }
+      return { ok: true };
+    } catch (e) {
+      return this.fail((e as Error).message);
+    }
+  }
+
+  renameAccount(accountId: string, label: string): { ok: boolean; error?: string } {
+    const acc = getAccountById(accountId);
+    const oldLabel = acc?.label;
+    try {
+      renameAccount(accountId, label);
+    } catch (e) {
+      return this.fail((e as Error).message);
+    }
+    // Cập nhật nhãn trên tab đang chạy dùng account này → badge "đang dùng" + tên panel phải không lệch.
+    if (acc && oldLabel) {
+      const clean = label.trim();
+      let changed = false;
+      for (const tb of this.mgr.tabs) {
+        if (tb.providerId === acc.providerId && tb.accountLabel === oldLabel) {
+          tb.accountLabel = clean;
+          changed = true;
+        }
+      }
+      if (changed) this.send("tabs:changed", this.getState());
+    }
+    return { ok: true };
+  }
+
+  setDefaultAccount(accountId: string): { ok: boolean; error?: string } {
+    try {
+      setDefaultAccountById(accountId);
+      return { ok: true };
+    } catch (e) {
+      return this.fail((e as Error).message);
+    }
   }
 
   listProviders(): ProviderInfo[] {
@@ -228,8 +321,8 @@ export class SessionBridge {
     return list;
   }
 
-  switchAccount(tabId: string, toLabel?: string, toDirect?: boolean): { ok: boolean; msg: string } {
-    const r = this.mgr.switchAccount(tabId, toLabel, toDirect);
+  switchAccount(tabId: string, toAccountId: string): { ok: boolean; msg: string } {
+    const r = this.mgr.switchAccount(tabId, toAccountId);
     this.send("status", { message: r.msg, kind: r.ok ? "info" : "error" });
     return r;
   }

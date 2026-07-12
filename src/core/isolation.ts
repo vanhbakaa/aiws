@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { projectProfileDir } from "./paths.js";
+import { accountConfigDir, profilesDir, projectProfileDir } from "./paths.js";
 import { resolveAccountEnv } from "./accounts.js";
 import { getSecret } from "./secrets.js";
 import { getCliTools } from "./tools.js";
@@ -38,23 +38,86 @@ export interface IsolatedLaunch {
   configDir: string;
 }
 
+/** Account oauth dùng config-dir GLOBAL (login dùng chung mọi project). */
+function isGlobalAccountDir(account?: AiAccount): boolean {
+  return !!account && account.authMethod === "oauth_login";
+}
+
+/** Copy đệ quy, KHÔNG ghi đè file đã có. statSync theo junction (dir projects/ cũ có thể là junction). */
+function mergeCopyInto(src: string, dst: string): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(src);
+  } catch {
+    return;
+  }
+  fs.mkdirSync(dst, { recursive: true });
+  for (const name of names) {
+    const s = path.join(src, name);
+    const d = path.join(dst, name);
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(s);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) mergeCopyInto(s, d);
+    else if (!fs.existsSync(d)) {
+      try {
+        fs.copyFileSync(s, d);
+      } catch {
+        /* bỏ file lỗi */
+      }
+    }
+  }
+}
+
+/**
+ * Di trú MỘT LẦN login+lịch sử từ scheme cũ (per-project `profiles/<proj>/<provider>__<accId>`) sang
+ * dir GLOBAL mới (`~/.aiws/accounts/<accId>/<provider>`). Non-destructive: chỉ COPY, giữ nguyên dir
+ * cũ. Chạy khi dir global CHƯA tồn tại → sau lần đầu là no-op. Gộp mọi project cũ (login trùng nhau
+ * nên bỏ-nếu-đã-có; transcript claude theo cwd nên không đụng nhau).
+ */
+function migrateLegacyAccountDir(account: AiAccount, provider: Provider, newDir: string): void {
+  if (fs.existsSync(newDir)) return; // đã có/đã di trú
+  const legacyName = `${provider.id}__${account.id}`;
+  let projs: fs.Dirent[];
+  try {
+    projs = fs.readdirSync(profilesDir(), { withFileTypes: true });
+  } catch {
+    return; // chưa có profiles cũ (cài mới) → không cần di trú
+  }
+  const sources = projs
+    .filter((e) => e.isDirectory())
+    .map((e) => path.join(profilesDir(), e.name, legacyName))
+    .filter((p) => {
+      try {
+        return fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  if (!sources.length) return;
+  for (const src of sources) mergeCopyInto(src, newDir);
+}
+
 /**
  * Config-dir của (project, provider[, account]).
+ * - oauth_login → dir GLOBAL theo account (auth = login nằm trong dir) →
+ *   `~/.aiws/accounts/<accountId>/<provider>`. Cùng account = cùng dir ở mọi project → không
+ *   phải login lại khi đổi project. Session vẫn tách theo cwd (claude tự tách; codex lọc cwd).
  * - env-based auth (api_key/cloud/local/custom) hoặc không account → DÙNG CHUNG
- *   `profiles/<proj>/<provider>` → session được giữ khi đổi account (hot-switch).
- * - oauth_login → dir riêng theo account (auth nằm trong dir) →
- *   `profiles/<proj>/<provider>__<accountId>`.
+ *   `profiles/<proj>/<provider>` (auth nằm ở env/secret, không có vấn đề login lại).
  */
 export function providerConfigDir(
   project: Project,
   provider: Provider,
   account?: AiAccount,
 ): string {
-  const base = projectProfileDir(project.id);
-  if (account && account.authMethod === "oauth_login") {
-    return path.join(base, `${provider.id}__${account.id}`);
+  if (isGlobalAccountDir(account)) {
+    return accountConfigDir(account!.id, provider.id);
   }
-  return path.join(base, provider.id);
+  return path.join(projectProfileDir(project.id), provider.id);
 }
 
 /**
@@ -67,6 +130,8 @@ export function buildIsolatedEnv(
   account?: AiAccount,
 ): IsolatedLaunch {
   const configDir = providerConfigDir(project, provider, account);
+  // Di trú login+lịch sử cũ (per-project) sang dir global lần đầu → không phải login lại, không mất chat.
+  if (isGlobalAccountDir(account)) migrateLegacyAccountDir(account!, provider, configDir);
   fs.mkdirSync(configDir, { recursive: true });
 
   // Bắt đầu từ môi trường cô lập chung (mọi CLI tool) rồi thêm config-dir của provider.
@@ -76,8 +141,12 @@ export function buildIsolatedEnv(
   const secret = account ? getSecret(account.id) : undefined;
   Object.assign(env, resolveAccountEnv(provider, account, secret));
 
-  // Chia sẻ transcript giữa các account cùng provider (junction về kho chung/project/provider).
-  linkSharedConversations(project, provider, configDir);
+  // Chia sẻ transcript giữa các account cùng provider CHỈ với dir per-project (env-based/no-account).
+  // Dir per-account global (oauth) đã dùng chung mọi project → junction sẽ trói TOÀN BỘ history của
+  // account vào một project → SAI. Bỏ qua; switch account nối tiếp qua carryTranscript (run.ts).
+  if (!isGlobalAccountDir(account)) {
+    linkSharedConversations(project, provider, configDir);
+  }
 
   return { env, configDir };
 }

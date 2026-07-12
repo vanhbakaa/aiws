@@ -1,6 +1,6 @@
 {
   "name": "aiws",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Desktop workspace for AI coding CLIs. Run Claude Code, Codex and others side by side, isolated per project.",
   "license": "Apache-2.0",
   "type": "module",
@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.12",
-    "@xterm/headless": "^6.0.0"
+    "@xterm/headless": "^6.0.0",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

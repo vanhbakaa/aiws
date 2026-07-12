@@ -13,13 +13,21 @@ export function registerIpc(bridge: SessionBridge, panelHost: PanelHost, init: I
   ipcMain.handle("workspace:getTree", () => bridge.getTree());
   ipcMain.handle("panel:get", () => panelHost.snapshot());
   ipcMain.handle("tab:open", (_e, req: OpenTabRequest) => bridge.openTab(req));
-  ipcMain.handle("account:add", (_e, req: OpenTabRequest) => bridge.addAccountTab(req));
   ipcMain.handle("tab:close", (_e, tabId: string) => bridge.closeTab(tabId));
   ipcMain.handle("tab:setActive", (_e, index: number) => bridge.setActiveTab(index));
-  ipcMain.handle("accounts:list", (_e, providerId: string) => bridge.listAccounts(providerId));
   ipcMain.handle("providers:list", () => bridge.listProviders());
-  ipcMain.handle("account:switch", (_e, p: { tabId: string; toLabel?: string; toDirect?: boolean }) =>
-    bridge.switchAccount(p.tabId, p.toLabel, p.toDirect),
+  ipcMain.handle("accounts:listAll", () => bridge.listAllAccounts());
+  ipcMain.handle("accounts:info", (_e, accountId: string) => bridge.accountInfo(accountId));
+  ipcMain.handle("accounts:create", (_e, p: { providerId: string; label: string }) =>
+    bridge.createAccount(p.providerId, p.label),
+  );
+  ipcMain.handle("accounts:remove", (_e, accountId: string) => bridge.removeAccount(accountId));
+  ipcMain.handle("accounts:rename", (_e, p: { accountId: string; label: string }) =>
+    bridge.renameAccount(p.accountId, p.label),
+  );
+  ipcMain.handle("accounts:setDefault", (_e, accountId: string) => bridge.setDefaultAccount(accountId));
+  ipcMain.handle("account:switch", (_e, p: { tabId: string; toAccountId: string }) =>
+    bridge.switchAccount(p.tabId, p.toAccountId),
   );
   ipcMain.handle("locale:set", (_e, locale: string) => setLocale(locale as Locale));
   ipcMain.handle("project:openFolderDialog", async (e) => {

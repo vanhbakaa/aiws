@@ -4,6 +4,13 @@ directories:
   output: dist-gui
   buildResources: build
 
+# Nguồn tự-động-cập-nhật (electron-updater đọc app-update.yml sinh từ đây). `gui:package` dùng
+# `--publish never` nên chỉ SINH metadata (latest*.yml + blockmap), KHÔNG tự upload — CI upload.
+publish:
+  provider: github
+  owner: vanhbakaa
+  repo: aiws
+
 # Do NOT rebuild native modules — @lydell/node-pty ships N-API prebuilds; this machine has no MSVC.
 npmRebuild: false
 nodeGypRebuild: false
@@ -37,6 +44,9 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   shortcutName: AI Workspace
+  # KHÔNG dùng tên có dấu cách: GitHub đổi cách → dấu chấm trong tên asset, lệch với url trong
+  # latest.yml (electron-builder dùng gạch ngang) → auto-update tải 404. Tên không-dấu-cách để khớp.
+  artifactName: aiws-${version}-setup.${ext}
 
 portable:
   artifactName: aiws-${version}-portable.exe

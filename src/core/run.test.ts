@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { addProject, getProjectByName } from "./projects.js";
 import { prepareRun, prepareShell, prepareSwitch, launchInline, type LaunchSpec } from "./run.js";
-import { addAccount } from "./accounts.js";
+import { addAccount, getAccountsForProvider } from "./accounts.js";
 
 let tmp: string;
 
@@ -23,11 +23,12 @@ describe("prepareRun", () => {
     const dir = path.join(tmp, "shop");
     fs.mkdirSync(dir);
     addProject({ name: "shop", path: dir });
+    addAccount({ providerId: "claude", label: "work", authMethod: "api_key", secret: { apiKey: "A" } });
 
     const spec = prepareRun("shop", "claude");
     expect(spec.cmd).toBe("claude");
     expect(spec.terminal.name).toBe("claude 1");
-    expect(spec.env.CLAUDE_CONFIG_DIR).toContain("profiles");
+    expect(spec.env.CLAUDE_CONFIG_DIR).toContain("profiles"); // api_key → dir project-scoped
     expect(spec.cwd).toBe(path.resolve(dir));
     expect(spec.mode).toBe("run");
     // provider claude có sessionIdFlag → args chứa --session-id <uuid>
@@ -58,6 +59,7 @@ describe("prepareRun", () => {
     const dir = path.join(tmp, "shop");
     fs.mkdirSync(dir);
     addProject({ name: "shop", path: dir });
+    addAccount({ providerId: "claude", label: "work", authMethod: "api_key", secret: { apiKey: "A" } });
     prepareRun("shop", "claude");
     const second = prepareRun("shop", "claude");
     expect(second.terminal.name).toBe("claude 2");
@@ -158,15 +160,20 @@ describe("prepareSwitch (hot-switch)", () => {
     expect(sw.args).toContain(sid);
   });
 
-  it("về đăng nhập trực tiếp (toDirect) dùng config-dir chung, không account", () => {
-    const dir = path.join(tmp, "shop");
+  it("đổi account theo id (toAccountId)", () => {
+    setup2Accounts();
+    const personal = getAccountsForProvider("claude").find((a) => a.label === "personal")!;
+    prepareRun("shop", "claude"); // account work (mặc định)
+    const sw = prepareSwitch("shop", undefined, { toAccountId: personal.id });
+    expect(sw.accountLabel).toBe("personal");
+    expect(sw.env.ANTHROPIC_API_KEY).toBe("B");
+  });
+
+  it("bỏ 'direct': prepareRun ném lỗi khi provider có-account mà chưa thêm account nào", () => {
+    const dir = path.join(tmp, "empty");
     fs.mkdirSync(dir);
-    addProject({ name: "shop", path: dir });
-    addAccount({ providerId: "claude", label: "a", authMethod: "oauth_login" });
-    const run = prepareRun("shop", "claude", { accountLabel: "a" });
-    const sw = prepareSwitch("shop", run.terminal.name, { toDirect: true });
-    expect(sw.accountLabel).toBeUndefined();
-    expect(sw.configDir).not.toBe(run.configDir); // dir chung ≠ dir account a
+    addProject({ name: "empty", path: dir });
+    expect(() => prepareRun("empty", "claude")).toThrow(/chưa có tài khoản/i);
   });
 
   it("báo lỗi khi chỉ có 1 account mà không có --to", () => {
@@ -176,6 +183,68 @@ describe("prepareSwitch (hot-switch)", () => {
     addAccount({ providerId: "claude", label: "only", authMethod: "api_key", secret: { apiKey: "A" } });
     prepareRun("s", "claude");
     expect(() => prepareSwitch("s")).toThrow(/≥2 account/);
+  });
+
+  it("đổi KHÁC LOẠI: có hội thoại nhưng đích không tổng hợp được (codex thiếu template) → fallback soft-handoff", () => {
+    const dir = path.join(tmp, "shop");
+    fs.mkdirSync(dir);
+    addProject({ name: "shop", path: dir });
+    const cwd = getProjectByName("shop")!.path;
+    addAccount({ providerId: "claude", label: "c", authMethod: "oauth_login" });
+    const x = addAccount({ providerId: "codex", label: "x", authMethod: "oauth_login" });
+    const run = prepareRun("shop", "claude", { accountLabel: "c" });
+    // claude terminal ĐÃ có hội thoại
+    const enc = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    const cdir = path.join(run.configDir, "projects", enc);
+    fs.mkdirSync(cdir, { recursive: true });
+    fs.writeFileSync(path.join(cdir, "s1.jsonl"), JSON.stringify({ message: { role: "user", content: "xin chào" } }) + "\n");
+    // codex đích chưa có rollout template → synth null → switch VẪN hoàn tất + ghi soft-handoff .md
+    const sw = prepareSwitch("shop", run.terminal.name, { toAccountId: x.id });
+    expect(sw.providerId).toBe("codex");
+    expect(fs.existsSync(path.join(cwd, ".aiws-handoff.md"))).toBe(true);
+    // providerId đã được LƯU vào store (fix bug switch lần 2 định tuyến sai)
+    expect(getProjectByName("shop")!.terminals.find((tm) => tm.id === run.terminal.id)!.providerId).toBe("codex");
+  });
+
+  it("đổi KHÁC LOẠI khi CHƯA có hội thoại → chỉ đổi loại, mở phiên mới sạch (không ném)", () => {
+    const dir = path.join(tmp, "shop");
+    fs.mkdirSync(dir);
+    addProject({ name: "shop", path: dir });
+    addAccount({ providerId: "claude", label: "c", authMethod: "oauth_login" });
+    const x = addAccount({ providerId: "codex", label: "x", authMethod: "oauth_login" });
+    const run = prepareRun("shop", "claude", { accountLabel: "c" });
+    const sw = prepareSwitch("shop", run.terminal.name, { toAccountId: x.id });
+    expect(sw.providerId).toBe("codex");
+    expect(sw.accountLabel).toBe("x");
+  });
+
+  it("đổi KHÁC LOẠI codex→claude: nạp native hội thoại rồi --continue", () => {
+    const dir = path.join(tmp, "shop");
+    fs.mkdirSync(dir);
+    addProject({ name: "shop", path: dir });
+    const cwd = getProjectByName("shop")!.path;
+    addAccount({ providerId: "codex", label: "x", authMethod: "oauth_login" });
+    const cl = addAccount({ providerId: "claude", label: "c", authMethod: "oauth_login" });
+    const run = prepareRun("shop", "codex", { accountLabel: "x" });
+    // giả lập 1 rollout codex có hội thoại (đúng cwd) trong dir global của account codex
+    const sess = path.join(run.configDir, "sessions", "2026", "01", "01");
+    fs.mkdirSync(sess, { recursive: true });
+    const lines = [
+      { type: "session_meta", payload: { cwd, id: "s", session_id: "s" } },
+      { type: "turn_context", payload: { turn_id: "t1" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "từ codex" }] } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "trả lời" }] } },
+    ];
+    fs.writeFileSync(path.join(sess, "rollout-2026-01-01T00-00-00-abc.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const sw = prepareSwitch("shop", run.terminal.name, { toAccountId: cl.id });
+    expect(sw.providerId).toBe("claude"); // đổi cả provider
+    expect(sw.accountLabel).toBe("c");
+    expect(sw.args).toContain("--continue");
+    // transcript synth được ghi vào dir global của account claude, đúng cwd
+    const enc = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    const files = fs.readdirSync(path.join(sw.configDir, "projects", enc)).filter((f) => f.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThan(0);
   });
 });
 

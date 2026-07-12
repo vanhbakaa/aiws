@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { addTerminal, getProjectByName, updateTerminalAccount } from "./projects.js";
+import { addTerminal, getProjectByName, updateTerminal, updateTerminalAccount } from "./projects.js";
 import { getProvider } from "./providers.js";
 import { buildIsolatedEnv, buildProjectEnv, providerConfigDir } from "./isolation.js";
 import { getAccountById, getAccountsForProvider, getDefaultAccount, nextAccount } from "./accounts.js";
@@ -9,8 +9,8 @@ import { defaultShell } from "./exec.js";
 import { encodeProjectDir, latestTranscriptFile } from "./sessionContext.js";
 import { t, getLocale } from "./i18n.js";
 import { loadWorkspace } from "./storage.js";
-import { writeHandoff } from "./handoff.js";
-import { prepareNativeCarry } from "./nativeHandoff.js";
+import { writeHandoff, writeHandoffFromMsgs } from "./handoff.js";
+import { prepareNativeCarry, extractMessages, synthForTarget } from "./nativeHandoff.js";
 import { spawnInherit } from "./spawn.js";
 import type { AiAccount, Project, Provider, Terminal } from "./types.js";
 
@@ -99,6 +99,11 @@ export function prepareRun(
     } else {
       account = getDefaultAccount(providerId);
     }
+    // Bỏ "direct": provider có account thì BẮT BUỘC chọn được account. GUI hỏi thêm tài khoản
+    // (đặt tên) trước khi mở terminal nên nhánh này chỉ chạy khi gọi sai từ CLI/test.
+    if (!account) {
+      throw new Error(t("errNoAccountYet", { provider: providerId }));
+    }
   }
 
   const { env, configDir } = buildIsolatedEnv(project, provider, account);
@@ -123,7 +128,7 @@ export function prepareRun(
       args = [...provider.launchCmd.slice(1), provider.continueFlag as string];
       note = en ? "Continuing your latest conversation." : "Đang tiếp tục hội thoại gần nhất.";
     } else {
-      const native = prepareNativeCarry(project, providerId);
+      const native = prepareNativeCarry(project, providerId, configDir);
       if (native) {
         sessionId = native.sessionId;
         args = [...provider.launchCmd.slice(1), ...native.resumeArgs];
@@ -218,18 +223,18 @@ function resolveTerminal(project: Project, ref?: string): Terminal {
 }
 
 /**
- * Chuẩn bị HOT-SWITCH account cho một terminal: đổi sang account kế tiếp (hoặc --to / trực tiếp),
- * dựng env cô lập, và MANG hội thoại đang chạy sang tài khoản mới.
+ * Chuẩn bị HOT-SWITCH account cho một terminal: đổi sang account cụ thể (theo id / label) hoặc
+ * account kế tiếp, dựng env cô lập, và MANG hội thoại đang chạy sang tài khoản mới.
  *
  * - env-based (api_key/…): config-dir dùng chung → session vốn ở đó, chỉ đổi auth (env).
- * - oauth_login (mỗi account 1 config-dir riêng): COPY transcript phiên đang chạy sang dir mới
+ * - oauth_login (mỗi account 1 config-dir global): COPY transcript phiên đang chạy sang dir mới
  *   rồi `--resume` → hội thoại theo được qua tài khoản khác (không còn mất chat khi switch).
- * - toDirect: về đăng nhập trực tiếp (không account, dùng config-dir chung của provider).
+ * - Đổi sang account KHÁC LOẠI (provider khác): xem prepareProviderSwitch (Phase D). Bỏ "direct".
  */
 export function prepareSwitch(
   projectName: string,
   terminalRef?: string,
-  opts?: { toLabel?: string; toDirect?: boolean },
+  opts?: { toAccountId?: string; toLabel?: string },
 ): LaunchSpec {
   const project = getProjectByName(projectName);
   if (!project) throw new Error(`Không tìm thấy project "${projectName}"`);
@@ -239,24 +244,34 @@ export function prepareSwitch(
   if (!provider) throw new Error(`Provider "${terminal.providerId}" của terminal không còn trong registry`);
   if (!provider.hasAccounts) throw new Error(`Provider "${provider.id}" không dùng account (không cần switch)`);
 
-  let target: AiAccount | undefined; // undefined = đăng nhập trực tiếp (không account)
-  if (!opts?.toDirect) {
+  // Chọn account đích (bỏ "direct": luôn phải là một account).
+  let target: AiAccount;
+  if (opts?.toAccountId) {
+    const found = getAccountById(opts.toAccountId);
+    if (!found) throw new Error(`Không tìm thấy account id "${opts.toAccountId}"`);
+    target = found;
+  } else {
     const accts = getAccountsForProvider(provider.id);
-    if (accts.length === 0) {
-      throw new Error(`Chưa có account cho "${provider.id}". Thêm: aiws ai-account add ${provider.id} <label>`);
-    }
+    if (accts.length === 0) throw new Error(`Chưa có account cho "${provider.id}". Thêm account trước khi switch.`);
     if (opts?.toLabel) {
-      target = accts.find((a) => a.label === opts.toLabel);
-      if (!target) throw new Error(`Không có account "${opts.toLabel}" cho provider "${provider.id}"`);
+      const found = accts.find((a) => a.label === opts.toLabel);
+      if (!found) throw new Error(`Không có account "${opts.toLabel}" cho provider "${provider.id}"`);
+      target = found;
     } else {
-      if (accts.length < 2) throw new Error(`Cần ≥2 account để luân phiên (hiện có ${accts.length}). Thêm account hoặc dùng --to <label>.`);
-      target = nextAccount(provider.id, terminal.aiAccountId);
-      if (!target) throw new Error(`Không chọn được account để switch`);
+      if (accts.length < 2) throw new Error(`Cần ≥2 account để luân phiên (hiện có ${accts.length}).`);
+      const next = nextAccount(provider.id, terminal.aiAccountId);
+      if (!next) throw new Error(`Không chọn được account để switch`);
+      target = next;
     }
   }
 
+  // Đổi KHÁC LOẠI (provider khác) → nhánh riêng (native-carry). Phase D thay bằng cài đặt đầy đủ.
+  if (target.providerId !== provider.id) {
+    return prepareProviderSwitch(project, terminal, target);
+  }
+
   requireExistingDir(project);
-  updateTerminalAccount(project.id, terminal.id, target?.id);
+  updateTerminalAccount(project.id, terminal.id, target.id);
 
   const cmd = provider.launchCmd[0];
   if (!cmd) throw new Error(`Provider "${provider.id}" cấu hình sai: launchCmd rỗng`);
@@ -265,7 +280,7 @@ export function prepareSwitch(
   const oldConfigDir = providerConfigDir(project, provider, current);
   const { env, configDir } = buildIsolatedEnv(project, provider, target);
 
-  const label = target?.label ?? t("labelDirect");
+  const label = target.label;
 
   // Xác định session để resume + mang hội thoại nếu đổi config-dir (oauth).
   let resumeId: string | undefined = terminal.sessionId;
@@ -286,7 +301,7 @@ export function prepareSwitch(
       resumeId = own ? path.basename(own, ".jsonl") : undefined;
     }
   }
-  const updated: Terminal = { ...terminal, aiAccountId: target?.id, sessionId: resumeId ?? terminal.sessionId };
+  const updated: Terminal = { ...terminal, aiAccountId: target.id, sessionId: resumeId ?? terminal.sessionId };
   return {
     cmd,
     args: buildArgs(provider, resumeId, resumeId !== undefined),
@@ -297,9 +312,73 @@ export function prepareSwitch(
     projectId: project.id,
     projectName: project.name,
     configDir,
-    accountLabel: target?.label,
+    accountLabel: target.label,
     mode: "switch",
     note: carriedNote ?? (resumeId === undefined ? t("noteNewSession", { label }) : undefined),
+  };
+}
+
+/**
+ * Đổi terminal sang account KHÁC LOẠI (provider khác): relaunch bằng CLI của provider đích và NẠP
+ * NATIVE toàn bộ hội thoại đang làm (tổng hợp session native cho đích rồi resume). KHÔNG phải tóm
+ * tắt — AI mới nhận nguyên văn hội thoại và nói tiếp. Giới hạn: trạng thái tool-call/diff/reasoning
+ * nội bộ không chuyển được giữa 2 CLI. Không tổng hợp được (vd codex thiếu template) → ném lỗi để
+ * fallback cùng loại (hướng 2 người dùng đã chấp nhận).
+ */
+function prepareProviderSwitch(project: Project, terminal: Terminal, target: AiAccount): LaunchSpec {
+  requireExistingDir(project);
+
+  const srcProvider = getProvider(terminal.providerId);
+  const targetProvider = getProvider(target.providerId);
+  if (!srcProvider || !targetProvider) throw new Error(t("crossTypeOnly"));
+  const cmd = targetProvider.launchCmd[0];
+  if (!cmd) throw new Error(`Provider "${target.providerId}" cấu hình sai: launchCmd rỗng`);
+
+  // 1. Trích hội thoại đang làm từ dir của account nguồn (đúng cwd project này).
+  const srcAccount = terminal.aiAccountId ? getAccountById(terminal.aiAccountId) : undefined;
+  const srcConfigDir = providerConfigDir(project, srcProvider, srcAccount);
+  const msgs = extractMessages(srcProvider.id, srcConfigDir, project.path);
+
+  // 2. Dựng env cô lập cho account đích (tạo dir global của nó nếu chưa có).
+  const { env, configDir } = buildIsolatedEnv(project, targetProvider, target);
+
+  // 3. Ưu tiên NẠP NATIVE (AI mới nói tiếp nguyên văn). Không tổng hợp được (vd codex đích chưa từng
+  //    chạy → thiếu template) mà VẪN có hội thoại → fallback soft-handoff (.aiws-handoff.md) + phiên
+  //    mới. Không có hội thoại → phiên mới sạch. (KHÔNG ném crossTypeOnly để không chặn switch một
+  //    cách khó hiểu — thao tác luôn hoàn tất, chỉ khác mức mang được ngữ cảnh.)
+  const carry = synthForTarget(project, target.providerId, configDir, msgs);
+  let args: string[];
+  let sessionId: string | undefined;
+  let note: string;
+  if (carry) {
+    args = [...targetProvider.launchCmd.slice(1), ...carry.resumeArgs];
+    sessionId = carry.sessionId;
+    note = t("noteCarriedNative", { count: carry.count, from: srcProvider.id, label: target.label });
+  } else {
+    sessionId = targetProvider.sessionIdFlag ? randomUUID() : undefined;
+    args = buildArgs(targetProvider, sessionId, false);
+    const h = msgs.length ? writeHandoffFromMsgs(project, srcProvider.id, msgs) : null;
+    note = h ? t("noteHandoff", { count: h.count, from: h.from, file: h.file }) : t("switchedFresh", { label: target.label });
+  }
+
+  // Lưu CẢ providerId (không chỉ account): lần switch sau đọc từ store, nếu providerId cũ còn đó sẽ
+  // định tuyến bằng provider sai → đọc config-dir rỗng → mất hội thoại.
+  updateTerminal(project.id, terminal.id, { providerId: target.providerId, aiAccountId: target.id, sessionId });
+
+  const updated: Terminal = { ...terminal, providerId: target.providerId, aiAccountId: target.id, sessionId };
+  return {
+    cmd,
+    args,
+    env,
+    cwd: project.path,
+    terminal: updated,
+    providerId: target.providerId,
+    projectId: project.id,
+    projectName: project.name,
+    configDir,
+    accountLabel: target.label,
+    mode: "switch",
+    note,
   };
 }
 

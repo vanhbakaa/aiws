@@ -264,19 +264,24 @@ body.col-resizing .xterm { pointer-events: none; }
 .acct-line.linkbtn:hover .who2 { color: var(--accent); }
 
 /* ---- accounts panel ---- */
-.accounts-modal { min-width: 640px; max-width: 900px; width: 82vw; display: flex; flex-direction: column; max-height: 80vh; }
-.accounts-body { overflow-y: auto; padding: 2px 2px 6px; }
+/* .modal.accounts-modal (2 classes) beats the base .modal max-width:460px regardless of source order. */
+.modal.accounts-modal {
+  min-width: min(680px, 96vw); max-width: 940px; width: 90vw;
+  display: flex; flex-direction: column; max-height: 82vh;
+}
+.accounts-body { overflow-y: auto; padding: 2px 6px 6px; }
 .accounts-empty { padding: 18px 10px; }
-.acct-group { margin-bottom: 8px; }
-.acct-group-h { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px 6px; }
-.accounts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 8px; padding: 0 6px; }
+/* Cố định 3 CỘT → luôn 3 account/dòng bất kể provider (minmax(0,1fr) cho thẻ co lại, không tràn). */
+.accounts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .acct-card {
   border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; background: var(--panel-2);
   display: flex; flex-direction: column;
 }
 .acct-card.cur { border-color: var(--green); }
-.acct-card-top { display: flex; align-items: center; gap: 7px; }
-.acct-card-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-card-prov { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.acct-card-top { display: flex; align-items: center; gap: 8px; }
+/* name takes the slack → badges pushed to the right edge (not tight against the text). */
+.acct-card-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-rename {
   background: var(--panel); border: 1px solid var(--accent); border-radius: 5px; color: var(--ink);
   font: inherit; padding: 1px 6px; min-width: 0; flex: 1;
@@ -287,8 +292,9 @@ body.col-resizing .xterm { pointer-events: none; }
 .acct-card .resetline { margin-top: 4px; }
 .acct-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 9px; }
 .badge {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border);
-  color: var(--faint); text-transform: uppercase; letter-spacing: .03em;
+  flex-shrink: 0; white-space: nowrap; font-size: 9.5px; line-height: 1.6; padding: 1px 7px;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--faint);
+  text-transform: uppercase; letter-spacing: .02em;
 }
 .badge.cur { color: var(--green); border-color: var(--green); }
 .mini {

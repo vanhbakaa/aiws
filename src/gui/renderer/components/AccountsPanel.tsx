@@ -112,13 +112,14 @@ export function AccountsPanel({
     onClose();
   };
 
-  // group accounts by provider (stable order = provider first-seen)
-  const groups: { pid: string; accs: AccountInfo[] }[] = [];
-  for (const a of accounts) {
-    let g = groups.find((x) => x.pid === a.providerId);
-    if (!g) groups.push((g = { pid: a.providerId, accs: [] }));
-    g.accs.push(a);
-  }
+  // Xếp PHẲNG: 1 lưới cho MỌI account (gom cùng provider cạnh nhau, mặc-định-trước) → luôn 3/dòng,
+  // KHÔNG bị header provider cắt dòng. Provider hiện ngay trên từng thẻ.
+  const sorted = [...accounts].sort(
+    (a, b) =>
+      a.providerId.localeCompare(b.providerId) ||
+      (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0) ||
+      a.label.localeCompare(b.label),
+  );
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -126,80 +127,78 @@ export function AccountsPanel({
         <div className="modal-title">{t("accountsTitle")}</div>
         <div className="accounts-body">
           {accounts.length === 0 && <div className="muted accounts-empty">{t("noAccountsYet")}</div>}
-          {groups.map((g) => (
-            <div key={g.pid} className="acct-group">
-              <div className="acct-group-h">{g.pid}</div>
-              <div className="accounts-grid">
-                {g.accs.map((a) => {
-                  const d = detail[a.id];
-                  const cur = !!activeTab && activeTab.providerId === a.providerId && activeTab.accountLabel === a.label;
-                  return (
-                    <div key={a.id} className={"acct-card" + (cur ? " cur" : "")}>
-                      <div className="acct-card-top">
-                        <span className="dot" style={{ background: d?.loggedIn ? "var(--green)" : "var(--amber)" }} />
-                        {editing === a.id ? (
-                          <input
-                            className="acct-rename"
-                            autoFocus
-                            value={editVal}
-                            onChange={(e) => setEditVal(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") commitRename(a.id);
-                              else if (e.key === "Escape") setEditing(null);
-                            }}
-                          />
-                        ) : (
-                          <span className="acct-card-name">{a.label}</span>
-                        )}
-                        {a.isDefault && <span className="badge">{t("defaultBadge")}</span>}
-                        {cur && <span className="badge cur">{t("inUse")}</span>}
-                      </div>
-                      <div className="acct-card-type">
-                        {!d ? "…" : d.loggedIn ? d.accountType ?? d.accountName ?? "" : t("notLoggedIn")}
-                      </div>
-                      {d?.loggedIn && <UsageBars usage={d.usage} />}
-                      <div className="acct-card-actions">
-                        {canUse && (
-                          <button className="mini" disabled={busy || cur} onClick={() => void doUse(a)}>
-                            {t("useHere")}
-                          </button>
-                        )}
-                        {!a.isDefault && (
-                          <button className="mini" disabled={busy} onClick={() => doDefault(a.id)}>
-                            {t("makeDefault")}
-                          </button>
-                        )}
-                        <button
-                          className="mini"
-                          disabled={busy}
-                          onClick={() => {
-                            setEditing(a.id);
-                            setEditVal(a.label);
+          {accounts.length > 0 && (
+            <div className="accounts-grid">
+              {sorted.map((a) => {
+                const d = detail[a.id];
+                const cur = !!activeTab && activeTab.providerId === a.providerId && activeTab.accountLabel === a.label;
+                return (
+                  <div key={a.id} className={"acct-card" + (cur ? " cur" : "")}>
+                    <div className="acct-card-prov">{a.providerId}</div>
+                    <div className="acct-card-top">
+                      <span className="dot" style={{ background: d?.loggedIn ? "var(--green)" : "var(--amber)" }} />
+                      {editing === a.id ? (
+                        <input
+                          className="acct-rename"
+                          autoFocus
+                          value={editVal}
+                          onChange={(e) => setEditVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitRename(a.id);
+                            else if (e.key === "Escape") setEditing(null);
                           }}
-                        >
-                          {t("rename")}
-                        </button>
-                        {confirmRemove === a.id ? (
-                          <>
-                            <button className="mini danger" disabled={busy} onClick={() => doRemove(a.id)}>
-                              {t("confirmRemove")}
-                            </button>
-                            <button className="mini" disabled={busy} onClick={() => setConfirmRemove(null)}>
-                              {t("cancel")}
-                            </button>
-                          </>
-                        ) : (
-                          <button className="mini danger" disabled={busy} onClick={() => setConfirmRemove(a.id)}>
-                            {t("remove")}
-                          </button>
-                        )}
-                      </div>
+                        />
+                      ) : (
+                        <span className="acct-card-name">{a.label}</span>
+                      )}
+                      {a.isDefault && <span className="badge">{t("defaultBadge")}</span>}
+                      {cur && <span className="badge cur">{t("inUse")}</span>}
                     </div>
-                  );
-                })}
-              </div>
+                    <div className="acct-card-type">
+                      {!d ? "…" : d.loggedIn ? d.accountType ?? d.accountName ?? "" : t("notLoggedIn")}
+                    </div>
+                    {d?.loggedIn && <UsageBars usage={d.usage} />}
+                    <div className="acct-card-actions">
+                      {canUse && (
+                        <button className="mini" disabled={busy || cur} onClick={() => void doUse(a)}>
+                          {t("useHere")}
+                        </button>
+                      )}
+                      {!a.isDefault && (
+                        <button className="mini" disabled={busy} onClick={() => doDefault(a.id)}>
+                          {t("makeDefault")}
+                        </button>
+                      )}
+                      <button
+                        className="mini"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(a.id);
+                          setEditVal(a.label);
+                        }}
+                      >
+                        {t("rename")}
+                      </button>
+                      {confirmRemove === a.id ? (
+                        <>
+                          <button className="mini danger" disabled={busy} onClick={() => doRemove(a.id)}>
+                            {t("confirmRemove")}
+                          </button>
+                          <button className="mini" disabled={busy} onClick={() => setConfirmRemove(null)}>
+                            {t("cancel")}
+                          </button>
+                        </>
+                      ) : (
+                        <button className="mini danger" disabled={busy} onClick={() => setConfirmRemove(a.id)}>
+                          {t("remove")}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
         </div>
         <div className="accounts-foot">
           <select value={addSel} onChange={(e) => setAddProvider(e.target.value)}>

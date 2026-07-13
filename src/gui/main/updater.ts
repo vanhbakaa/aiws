@@ -5,7 +5,7 @@ import { getLocale } from "../../core/i18n";
 // electron-updater là CommonJS → lấy autoUpdater qua default import (interop ESM).
 const { autoUpdater } = electronUpdater;
 
-const SIX_HOURS = 6 * 60 * 60 * 1000;
+const CHECK_EVERY = 15 * 60 * 1000; // kiểm tra bản mới mỗi 15 phút (ngoài lần kiểm ngay lúc mở app)
 
 /**
  * Tự động cập nhật từ GitHub Releases (nguồn = publish config trong electron-builder.yml → app-update.yml).
@@ -47,5 +47,5 @@ export function initAutoUpdate(getWin: () => BrowserWindow | null): void {
 
   const check = () => autoUpdater.checkForUpdates().catch(() => {});
   check(); // ngay khi mở
-  setInterval(check, SIX_HOURS); // và định kỳ khi app mở lâu
+  setInterval(check, CHECK_EVERY); // và định kỳ khi app mở lâu
 }

@@ -14,7 +14,8 @@ export interface UsageInfo {
   sevenDay?: UsageWindow;
 }
 
-const CACHE_MS = 180_000; // endpoint 429 rất gắt nếu poll nhanh → cache 180s
+const CACHE_MS = 180_000; // endpoint 429 rất gắt nếu poll nhanh → cache kết quả TỐT 180s
+const FAIL_MS = 20_000; // kết quả LỖI (429/blip) chỉ giữ 20s rồi thử lại → 1 lần miss không giấu usage 3 phút
 const UA = "claude-code/2.1.205"; // BẮT BUỘC bắt đầu bằng claude-code/ nếu không sẽ 429
 
 type Entry = { at: number; data: UsageInfo | null; inflight?: Promise<UsageInfo | null> };
@@ -50,7 +51,20 @@ async function fetchUsage(configDir: string): Promise<UsageInfo | null> {
     const j = (await res.json()) as any;
     const win = (w: any): UsageWindow | undefined =>
       w && typeof w.utilization === "number" ? { pct: Math.round(w.utilization), resetsAt: w.resets_at } : undefined;
-    return { fiveHour: win(j.five_hour), sevenDay: win(j.seven_day) };
+    let fiveHour = win(j.five_hour);
+    let sevenDay = win(j.seven_day);
+    // Shape mới của endpoint có mảng `limits` (kind: session = 5h, weekly_all = 7 ngày). Fallback sang
+    // nó nếu five_hour/seven_day biến mất → usage vẫn chạy khi Anthropic bỏ field cũ.
+    if (!fiveHour || !sevenDay) {
+      for (const l of Array.isArray(j.limits) ? j.limits : []) {
+        const w: UsageWindow | undefined =
+          l && typeof l.percent === "number" ? { pct: Math.round(l.percent), resetsAt: l.resets_at ?? undefined } : undefined;
+        if (!w) continue;
+        if (!fiveHour && l.kind === "session") fiveHour = w;
+        if (!sevenDay && l.kind === "weekly_all") sevenDay = w;
+      }
+    }
+    return { fiveHour, sevenDay };
   } catch {
     return null;
   }
@@ -61,7 +75,8 @@ export function getClaudeUsage(configDir: string): Promise<UsageInfo | null> {
   const now = Date.now();
   const c = cache.get(configDir);
   if (c) {
-    if (now - c.at < CACHE_MS) return Promise.resolve(c.data);
+    const ttl = c.data ? CACHE_MS : FAIL_MS; // giữ kết quả tốt lâu, nhưng thử lại sau lỗi rất nhanh
+    if (now - c.at < ttl) return Promise.resolve(c.data);
     if (c.inflight) return c.inflight;
   }
   const p = fetchUsage(configDir).then((data) => {

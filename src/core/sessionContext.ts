@@ -80,6 +80,68 @@ export function latestTranscriptFile(configDir: string, projectPath: string): st
   return latest;
 }
 
+/** Đọc tối đa `maxBytes` ĐẦU của file (first user message nằm gần đầu transcript). */
+function readHead(file: string, maxBytes: number): string | null {
+  try {
+    const size = fs.statSync(file).size;
+    const len = Math.min(size, maxBytes);
+    const fd = fs.openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, 0);
+      return buf.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+const previewCache = new Map<string, { mtime: number; preview: string }>();
+
+/**
+ * Tin nhắn NGƯỜI DÙNG đầu tiên của một transcript (để nhận diện phiên trong danh sách "mở lại").
+ * Bỏ qua record hệ thống (type≠user), system-reminder (`<...>`), caveat, và slash-command wrapper.
+ * Cache theo mtime nên gọi lại nhiều lần (mỗi lần vẽ cây) không đọc lại đĩa. "" nếu phiên rỗng.
+ */
+export function firstUserPreview(file: string, maxLen = 80): string {
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(file).mtimeMs;
+  } catch {
+    return "";
+  }
+  const cached = previewCache.get(file);
+  if (cached && cached.mtime === mtime) return cached.preview;
+
+  let preview = "";
+  const raw = readHead(file, 128 * 1024);
+  if (raw) {
+    for (const line of raw.split("\n")) {
+      const s = line.trim();
+      if (!s || s[0] !== "{") continue;
+      let o: any;
+      try {
+        o = JSON.parse(s);
+      } catch {
+        continue; // dòng cuối (đọc head) có thể bị cắt → bỏ qua
+      }
+      if (o?.type !== "user" || !o?.message) continue;
+      let content: unknown = o.message.content;
+      if (Array.isArray(content)) content = content.map((x: any) => (typeof x === "string" ? x : x?.text ?? "")).join(" ");
+      if (typeof content !== "string") continue;
+      const text = content.replace(/\s+/g, " ").trim();
+      // Bỏ system-reminder (`<...>`), caveat mở đầu, và command-message wrapper của Claude.
+      if (!text || text[0] === "<" || text.startsWith("Caveat:") || text.startsWith("/")) continue;
+      preview = text.length > maxLen ? text.slice(0, maxLen - 1).trimEnd() + "…" : text;
+      break;
+    }
+  }
+  previewCache.set(file, { mtime, preview });
+  return preview;
+}
+
 /** Đọc tối đa `maxBytes` cuối của file (tránh đọc cả file transcript lớn). */
 function readTail(file: string, maxBytes: number): string | null {
   try {

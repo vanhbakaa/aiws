@@ -5,6 +5,7 @@ import path from "node:path";
 import { addProject, getProjectByName } from "./projects.js";
 import { prepareRun, prepareShell, prepareSwitch, launchInline, type LaunchSpec } from "./run.js";
 import { addAccount, getAccountsForProvider } from "./accounts.js";
+import { accountConfigDir } from "./paths.js";
 
 let tmp: string;
 
@@ -245,6 +246,33 @@ describe("prepareSwitch (hot-switch)", () => {
     const enc = cwd.replace(/[^a-zA-Z0-9]/g, "-");
     const files = fs.readdirSync(path.join(sw.configDir, "projects", enc)).filter((f) => f.endsWith(".jsonl"));
     expect(files.length).toBeGreaterThan(0);
+  });
+
+  it("switch account KHÔNG đè hội thoại RẼ NHÁNH cùng id: sao lưu .orphan trước khi mang (không mất chat)", () => {
+    const dir = path.join(tmp, "yt");
+    fs.mkdirSync(dir);
+    addProject({ name: "yt", path: dir });
+    const cwd = getProjectByName("yt")!.path;
+    const enc = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+    const A = addAccount({ providerId: "claude", label: "A", authMethod: "oauth_login" });
+    const B = addAccount({ providerId: "claude", label: "B", authMethod: "oauth_login" });
+    const run = prepareRun("yt", "claude", { accountLabel: "A" });
+
+    // A có phiên "sess1" (nấm nhầy); B cũng có "sess1" nhưng nội dung KHÁC hẳn (co-chan) = rẽ nhánh.
+    const aDir = path.join(run.configDir, "projects", enc);
+    const bDir = path.join(accountConfigDir(B.id, "claude"), "projects", enc);
+    fs.mkdirSync(aDir, { recursive: true });
+    fs.mkdirSync(bDir, { recursive: true });
+    fs.writeFileSync(path.join(aDir, "sess1.jsonl"), JSON.stringify({ type: "user", message: { role: "user", content: "nấm nhầy" } }) + "\n");
+    const bContent = JSON.stringify({ type: "user", message: { role: "user", content: "co chan nhan khac hoan toan" } }) + "\n";
+    fs.writeFileSync(path.join(bDir, "sess1.jsonl"), bContent);
+
+    prepareSwitch("yt", run.terminal.name, { toAccountId: B.id });
+
+    // Hội thoại cũ của B PHẢI được sao lưu nguyên vẹn (không bị đè mất) khi mang phiên của A sang.
+    const orphan = fs.readdirSync(bDir).find((f) => f.startsWith("sess1.orphan-"));
+    expect(orphan).toBeDefined();
+    expect(fs.readFileSync(path.join(bDir, orphan!), "utf8")).toBe(bContent);
   });
 });
 

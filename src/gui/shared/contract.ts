@@ -44,14 +44,34 @@ export interface ProjectTreeTerminal {
   running: boolean;
   tabId?: string;
 }
+/** A past conversation on disk that can be reopened (from transcripts, survives app restart). */
+export interface ResumableSessionDTO {
+  sessionId: string;
+  providerId: string;
+  accountId: string;
+  accountLabel?: string;
+  preview: string; // first user message, to recognize the session
+  mtimeMs: number;
+  live: boolean; // already open in a running tab right now → renderer hides it (shown as a live terminal)
+}
 export interface ProjectTreeNode {
   id: string;
   name: string;
   path: string;
   running: number;
   terminals: ProjectTreeTerminal[];
+  sessions: ResumableSessionDTO[]; // resumable past conversations (not currently live)
 }
 export type ProjectTree = ProjectTreeNode[];
+
+export interface ResumeSessionRequest {
+  projectName: string;
+  providerId: string;
+  accountId: string;
+  sessionId: string;
+  cols: number;
+  rows: number;
+}
 
 /** What the renderer opens on startup (initial project registered from cwd / --open dir). */
 export interface InitInfo {
@@ -113,6 +133,7 @@ export interface AiwsApi {
   getTree(): Promise<ProjectTree>;
   getPanel(): Promise<PanelSnapshot>;
   openTab(req: OpenTabRequest): Promise<CommandResult<TabSnapshot>>;
+  resumeSession(req: ResumeSessionRequest): Promise<CommandResult<TabSnapshot>>;
   closeTab(tabId: string): Promise<void>;
   setActiveTab(index: number): Promise<void>;
   listProviders(): Promise<ProviderInfo[]>;

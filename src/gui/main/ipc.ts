@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import type { InitInfo, OpenTabRequest } from "../shared/contract";
+import type { InitInfo, OpenTabRequest, ResumeSessionRequest } from "../shared/contract";
 import type { SessionBridge } from "./sessionBridge";
 import type { PanelHost } from "./panelHost";
 import { openFolderDialog } from "./dialogs";
@@ -13,6 +13,7 @@ export function registerIpc(bridge: SessionBridge, panelHost: PanelHost, init: I
   ipcMain.handle("workspace:getTree", () => bridge.getTree());
   ipcMain.handle("panel:get", () => panelHost.snapshot());
   ipcMain.handle("tab:open", (_e, req: OpenTabRequest) => bridge.openTab(req));
+  ipcMain.handle("session:resume", (_e, req: ResumeSessionRequest) => bridge.resumeSession(req));
   ipcMain.handle("tab:close", (_e, tabId: string) => bridge.closeTab(tabId));
   ipcMain.handle("tab:setActive", (_e, index: number) => bridge.setActiveTab(index));
   ipcMain.handle("providers:list", () => bridge.listProviders());

@@ -113,6 +113,29 @@ export function App() {
     if (r.ok) await openProjectTab(r.value.projectName, providerRef.current);
   }, [openProjectTab]);
 
+  // Reopen a specific past conversation from the project tree (resume the exact session + account).
+  const resumeSessionTab = useCallback(
+    async (projectName: string, s: ProjectTree[number]["sessions"][number]) => {
+      const { cols, rows, prepId } = reg.prepare();
+      const res = await aiws.resumeSession({
+        projectName,
+        providerId: s.providerId,
+        accountId: s.accountId,
+        sessionId: s.sessionId,
+        cols,
+        rows,
+      });
+      if (!res.ok) {
+        reg.discardPrepared(prepId);
+        setToast({ msg: res.error, kind: "error" });
+        window.setTimeout(() => setToast(null), 6000);
+        return;
+      }
+      reg.adopt(res.value.id, prepId);
+    },
+    [reg],
+  );
+
   // Open the "add account" dialog. Default provider = active AI tab's provider, else the tab-bar pick.
   const openAddAccount = useCallback((providerId?: string) => {
     const act = snapRef.current.tabs[snapRef.current.active];
@@ -309,6 +332,7 @@ export function App() {
           }}
           onRemoveProject={(name) => void aiws.removeProject(name)}
           onCloseTab={(tabId) => void aiws.closeTab(tabId)}
+          onResumeSession={(name, s) => void resumeSessionTab(name, s)}
         />
         <div className="gutter" onMouseDown={startDrag("left")} />
         <TerminalPane ref={hostRef} active={active} hasTabs={snap.tabs.length > 0} onOpenFolder={() => void openFolder()} />

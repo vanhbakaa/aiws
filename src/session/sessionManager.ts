@@ -1,4 +1,4 @@
-import { prepareRun, prepareShell, prepareSwitch } from "../core/run.js";
+import { prepareResume, prepareRun, prepareShell, prepareSwitch } from "../core/run.js";
 import { t } from "../core/i18n.js";
 import { materialize } from "../core/materialize.js";
 import { removeTerminal } from "../core/projects.js";
@@ -110,6 +110,60 @@ export class SessionManager {
     // khi provider thoát → tự đóng tab
     // Chỉ đóng tab khi CHÍNH session hiện tại thoát. Lúc switch, session cũ bị kill sẽ fire onExit
     // (bất đồng bộ) SAU khi đã gắn session mới → nếu không kiểm tra sẽ đóng nhầm tab vừa switch.
+    session.onExit(() => {
+      if (tab.session === session) this.close(tab.id);
+    });
+    this.tabs.push(tab);
+    this.active = this.tabs.length - 1;
+    this.sessionsVersion++;
+    this.emit();
+    return tab;
+  }
+
+  /**
+   * MỞ LẠI (resume) một phiên hội thoại cụ thể đã có trên đĩa (từ danh sách "phiên cũ" của cây
+   * project). Nếu phiên đó đang mở sẵn ở một tab → nhảy vào tab đó thay vì mở trùng. Trả null nếu
+   * provider chưa cài; ném lỗi nếu project/account sai (caller báo toast).
+   */
+  resume(
+    projectName: string,
+    opts: { providerId: string; accountId: string; sessionId: string },
+    launchOpts?: Partial<OpenOpts>,
+  ): Tab | null {
+    const spec = prepareResume(projectName, opts);
+    // Phiên này đang mở sẵn (cùng config-dir + cùng phiên) → focus, đừng mở trùng.
+    const openIdx = this.tabs.findIndex(
+      (t) => t.configDir === spec.configDir && t.sessionId === spec.terminal.sessionId,
+    );
+    if (openIdx >= 0) {
+      this.setActive(openIdx);
+      return this.tabs[openIdx];
+    }
+    const fa = ptyFileArgs(spec.cmd, spec.args);
+    if (!fa) return null; // chưa cài CLI — KHÔNG gỡ terminal (bản ghi vô hại, có thể đang tái dùng)
+    if (!launchOpts?.skipMaterialize) {
+      try {
+        materialize(spec.projectId, spec.providerId, spec.configDir);
+      } catch {
+        /* không chặn */
+      }
+    }
+    const cols = launchOpts?.cols ?? 80;
+    const rows = launchOpts?.rows ?? 24;
+    const session = new PtySession({ file: fa.file, args: fa.args, cwd: spec.cwd, env: spec.env, cols, rows, mirror: this.sessionOpts.mirror });
+    const tab: Tab = {
+      id: spec.terminal.id,
+      session,
+      projectId: spec.projectId,
+      projectName: spec.projectName,
+      projectPath: spec.cwd,
+      providerId: spec.providerId,
+      accountLabel: spec.accountLabel,
+      title: spec.terminal.name,
+      sessionId: spec.terminal.sessionId,
+      configDir: spec.configDir,
+      note: spec.note,
+    };
     session.onExit(() => {
       if (tab.session === session) this.close(tab.id);
     });

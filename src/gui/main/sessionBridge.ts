@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { SessionManager, type Tab } from "../../session/sessionManager";
 import { getLocale, t } from "../../core/i18n";
 import { listProjects, openProject, removeProject } from "../../core/projects";
+import { listResumableSessions } from "../../core/resumable";
 import {
   addAccount,
   getAccountById,
@@ -17,7 +18,7 @@ import { readAccountFor, readAccountTypeFor } from "../../core/providerInfo";
 import { getClaudeUsage } from "../../core/usage";
 import { getCodexLiveUsage, getCodexUsage } from "../../core/providerReaders";
 import { resolveCommand } from "../../core/which";
-import type { AccountDetail, AccountInfo, CommandResult, OpenTabRequest, ProviderInfo, ProjectTree, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
+import type { AccountDetail, AccountInfo, CommandResult, OpenTabRequest, ProviderInfo, ProjectTree, ResumeSessionRequest, TabSnapshot, WorkspaceSnapshot } from "../shared/contract";
 
 // How to install each provider's CLI (shown in the dropdown + error toast when it's missing).
 const INSTALL_HINTS: Record<string, string> = {
@@ -122,10 +123,18 @@ export class SessionBridge {
     this.pending.clear();
   }
 
-  /** Left-panel tree: every persisted project + its live tabs (running terminals). */
+  /**
+   * Left-panel tree: every persisted project + its live tabs (running terminals) + its resumable past
+   * conversations (read from transcripts on disk, so they survive an app restart). A session that is
+   * already open in a live tab is marked live=true → the renderer hides it (it's shown as a terminal).
+   */
   private tree(): ProjectTree {
     return listProjects().map((p) => {
       const live = this.mgr.tabs.filter((t) => t.projectId === p.id);
+      const sessions = listResumableSessions(p).map((s) => ({
+        ...s,
+        live: live.some((t) => t.configDir === accountConfigDir(s.accountId, s.providerId) && t.sessionId === s.sessionId),
+      }));
       return {
         id: p.id,
         name: p.name,
@@ -139,6 +148,7 @@ export class SessionBridge {
           running: !t.session.exited,
           tabId: t.id,
         })),
+        sessions,
       };
     });
   }
@@ -161,6 +171,25 @@ export class SessionBridge {
         cols: req.cols,
         rows: req.rows,
       });
+      if (!tab) {
+        const hint = INSTALL_HINTS[req.providerId];
+        return { ok: false, error: `Chưa cài "${req.providerId}"${hint ? ` — cài: ${hint}` : " hoặc không có trong PATH"}` };
+      }
+      if (tab.note) this.send("status", { message: tab.note, kind: "info" });
+      return { ok: true, value: tabToSnapshot(tab) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+
+  /** Reopen a specific past conversation (from the tree's resumable list) under its own account. */
+  resumeSession(req: ResumeSessionRequest): CommandResult<TabSnapshot> {
+    try {
+      const tab = this.mgr.resume(
+        req.projectName,
+        { providerId: req.providerId, accountId: req.accountId, sessionId: req.sessionId },
+        { cols: req.cols, rows: req.rows },
+      );
       if (!tab) {
         const hint = INSTALL_HINTS[req.providerId];
         return { ok: false, error: `Chưa cài "${req.providerId}"${hint ? ` — cài: ${hint}` : " hoặc không có trong PATH"}` };

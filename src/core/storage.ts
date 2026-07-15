@@ -39,10 +39,35 @@ export function loadWorkspace(): Workspace {
   }
 }
 
-/** Ghi workspace xuống config.json (tạo ~/.aiws nếu chưa có). */
+/**
+ * Ghi workspace xuống config.json (tạo ~/.aiws nếu chưa có). GHI ATOMIC: viết ra file tạm cùng thư
+ * mục, fsync, rồi rename đè lên bản cũ. writeFileSync thẳng sẽ truncate-rồi-mới-ghi → force-close
+ * (app treo bị tắt cứng) đúng lúc đang ghi có thể để lại config.json CỤT/RỖNG → mất sạch project khi
+ * load lại. rename là thao tác atomic của HĐH (Windows: MoveFileEx REPLACE_EXISTING) nên không bao
+ * giờ để lại file nửa vời.
+ */
 export function saveWorkspace(ws: Workspace): void {
   fs.mkdirSync(aiwsHome(), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(ws, null, 2) + "\n", "utf8");
+  const target = configPath();
+  const tmp = `${target}.tmp-${process.pid}`;
+  const data = JSON.stringify(ws, null, 2) + "\n";
+  const fd = fs.openSync(tmp, "w");
+  try {
+    fs.writeFileSync(fd, data, "utf8");
+    fs.fsyncSync(fd); // ép ghi xuống đĩa trước khi rename → không mất dữ liệu nếu mất điện ngay sau
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      /* dọn file tạm, bỏ qua lỗi */
+    }
+    throw e;
+  }
 }
 
 /** Đảm bảo config tồn tại: tạo file mặc định nếu thiếu, rồi trả về workspace. */

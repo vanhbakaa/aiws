@@ -10,6 +10,7 @@ export function ProjectsPanel({
   onFocusTab,
   onRemoveProject,
   onCloseTab,
+  onResumeSession,
 }: {
   tree: ProjectTree;
   activeProjectId?: string;
@@ -17,6 +18,7 @@ export function ProjectsPanel({
   onFocusTab: (tabId: string) => void;
   onRemoveProject: (name: string) => void;
   onCloseTab: (tabId: string) => void;
+  onResumeSession: (projectName: string, s: ProjectTree[number]["sessions"][number]) => void;
 }) {
   const t = useTr();
   // Projects are expanded by default; clicking a row collapses/expands it (like a file tree).
@@ -41,7 +43,9 @@ export function ProjectsPanel({
             </div>
           )}
           {tree.map((p) => {
-            const hasKids = p.terminals.length > 0;
+            // Past conversations that aren't already open as a live tab → offer to resume them.
+            const resumable = p.sessions.filter((s) => !s.live);
+            const hasKids = p.terminals.length > 0 || resumable.length > 0;
             const expanded = hasKids && !collapsed.has(p.id);
             return (
               <div key={p.id}>
@@ -106,6 +110,22 @@ export function ProjectsPanel({
                             ×
                           </span>
                         )}
+                      </div>
+                    ))}
+                    {/* Past conversations on disk (survive app restart) — click to reopen the exact session. */}
+                    {resumable.map((s) => (
+                      <div
+                        key={s.sessionId}
+                        className="kid resume"
+                        title={t("resumeTitle") + (s.preview ? " — " + s.preview : "")}
+                        onClick={() => onResumeSession(p.name, s)}
+                      >
+                        <span className="dot" style={{ background: dotColor(s.providerId), opacity: 0.5 }} />
+                        <span className="rprev">{s.preview || s.sessionId.slice(0, 8)}</span>
+                        {s.accountLabel ? <span className="racct"> · {s.accountLabel}</span> : null}
+                        <span className="kidx resumeic" title={t("resumeTitle")}>
+                          ↻
+                        </span>
                       </div>
                     ))}
                   </div>

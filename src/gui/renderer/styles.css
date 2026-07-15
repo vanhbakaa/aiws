@@ -170,6 +170,13 @@ body.col-resizing .xterm { pointer-events: none; }
 }
 .kid:hover .kidx { opacity: 1; }
 .kid .kidx:hover { color: var(--red); }
+/* Resumable past conversation (not currently running): muted, single-line preview + resume glyph. */
+.kid.resume { color: var(--faint); }
+.kid.resume:hover { color: var(--dim); }
+.kid.resume .rprev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kid.resume .racct { color: var(--faint); flex: none; }
+.kid .kidx.resumeic { opacity: 0.55; color: var(--faint); }
+.kid.resume:hover .kidx.resumeic { opacity: 1; color: var(--teal); }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
 .hint { color: var(--faint); font-size: 11.5px; padding: 8px 16px 12px; border-top: 1px solid var(--border-lo); }
 .hint b { color: var(--dim); font-weight: 600; }

@@ -50,9 +50,49 @@ function requireExistingDir(project: Project): void {
 }
 
 /**
+ * `dest` có phải TIỀN TỐ của `src` không (src = dest ghi nối thêm) → src là bản MỚI HƠN của CÙNG
+ * một phiên, đè lên là an toàn. Nếu không phải tiền tố → hai file là hai hội thoại ĐÃ RẼ NHÁNH (fork)
+ * dù trùng tên/id → đè sẽ mất dữ liệu. So sánh byte tới hết độ dài dest (dừng sớm khi lệch).
+ */
+function isContinuationOf(destFile: string, srcFile: string): boolean {
+  try {
+    const dSize = fs.statSync(destFile).size;
+    const sSize = fs.statSync(srcFile).size;
+    if (dSize > sSize) return false; // dest dài hơn src → src không thể là bản nối tiếp của dest
+    if (dSize === 0) return true;
+    const fdD = fs.openSync(destFile, "r");
+    const fdS = fs.openSync(srcFile, "r");
+    try {
+      const CHUNK = 64 * 1024;
+      const bufD = Buffer.alloc(CHUNK);
+      const bufS = Buffer.alloc(CHUNK);
+      let off = 0;
+      while (off < dSize) {
+        const n = Math.min(CHUNK, dSize - off);
+        fs.readSync(fdD, bufD, 0, n, off);
+        fs.readSync(fdS, bufS, 0, n, off);
+        if (Buffer.compare(bufD.subarray(0, n), bufS.subarray(0, n)) !== 0) return false;
+        off += n;
+      }
+      return true;
+    } finally {
+      fs.closeSync(fdD);
+      fs.closeSync(fdS);
+    }
+  } catch {
+    return false; // đọc lỗi → coi như KHÔNG phải tiền tố (thà sao lưu thừa còn hơn mất)
+  }
+}
+
+/**
  * Copy transcript của phiên ĐANG CHẠY từ oldDir sang newDir (cùng cwd) để `--resume` mang được
  * hội thoại qua config-dir tài khoản khác (oauth mỗi account 1 dir). Trả session-id để resume,
  * hoặc null nếu chưa có transcript nào để mang.
+ *
+ * AN TOÀN DỮ LIỆU: nếu newDir ĐÃ có file cùng id nhưng là hội thoại RẼ NHÁNH khác (do hot-switch
+ * account làm 2 phiên khác nhau chung một session-id), thì SAO LƯU nó ra `<id>.orphan-<mtime>.jsonl`
+ * trước khi đè, thay vì đè thẳng làm mất hội thoại. (Đây là bug đã làm mất một phiên chat: một truyện
+ * bị đè bởi truyện khác cùng id khi switch account.)
  */
 function carryTranscript(oldDir: string, newDir: string, cwd: string): string | null {
   const latest = latestTranscriptFile(oldDir, cwd);
@@ -62,8 +102,19 @@ function carryTranscript(oldDir: string, newDir: string, cwd: string): string | 
   const dest = path.join(destDir, `${id}.jsonl`);
   try {
     fs.mkdirSync(destDir, { recursive: true });
-    // Khi hội thoại đã chia sẻ (junction), old & new trỏ CÙNG file → khỏi copy (tránh lỗi same-file).
-    if (fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(latest)) return id;
+    if (fs.existsSync(dest)) {
+      // Khi hội thoại đã chia sẻ (junction), old & new trỏ CÙNG file → khỏi copy (tránh lỗi same-file).
+      if (fs.realpathSync(dest) === fs.realpathSync(latest)) return id;
+      // dest là hội thoại KHÁC (không phải bản cũ của latest) → sao lưu trước khi đè để không mất.
+      if (!isContinuationOf(dest, latest)) {
+        const bak = path.join(destDir, `${id}.orphan-${Math.floor(fs.statSync(dest).mtimeMs)}.jsonl`);
+        try {
+          if (!fs.existsSync(bak)) fs.copyFileSync(dest, bak);
+        } catch {
+          return id; // không sao lưu được → KHÔNG đè, giữ nguyên dest (thà không mang còn hơn mất chat)
+        }
+      }
+    }
     fs.copyFileSync(latest, dest);
     return id;
   } catch {
@@ -168,6 +219,78 @@ export function prepareRun(
     accountLabel: account?.label,
     mode: "run",
     note,
+  };
+}
+
+/**
+ * Chuẩn bị MỞ LẠI (resume) một phiên hội thoại CỤ THỂ đã có trên đĩa — dùng cho danh sách "phiên cũ"
+ * trong cây project sau khi mở lại app. Khác prepareRun (luôn --continue phiên MỚI NHẤT của account
+ * mặc định): ở đây resume ĐÚNG sessionId dưới ĐÚNG account nơi phiên được lưu, nên quay lại được đúng
+ * cuộc trò chuyện kể cả khi nó không phải cái mới nhất và nằm ở account khác account mặc định.
+ * Nếu file phiên không còn (đã dời) → fallback phiên mới nhất của account đó; hết thì mở phiên mới.
+ */
+export function prepareResume(
+  projectName: string,
+  opts: { providerId: string; accountId: string; sessionId: string },
+): LaunchSpec {
+  const project = getProjectByName(projectName);
+  if (!project) throw new Error(`Không tìm thấy project "${projectName}"`);
+
+  const provider = getProvider(opts.providerId);
+  if (!provider) throw new Error(`Không có provider "${opts.providerId}"`);
+  const cmd = provider.launchCmd[0];
+  if (!cmd) throw new Error(`Provider "${opts.providerId}" cấu hình sai: launchCmd rỗng`);
+
+  requireExistingDir(project);
+
+  const account = provider.hasAccounts ? getAccountById(opts.accountId) : undefined;
+  if (provider.hasAccounts && !account) throw new Error(`Không tìm thấy account id "${opts.accountId}"`);
+
+  const { env, configDir } = buildIsolatedEnv(project, provider, account);
+
+  // Xác định phiên để resume: ưu tiên sessionId yêu cầu nếu file còn; nếu không → phiên mới nhất của
+  // account này (transcript có thể đã đổi id khi carry); hết thì undefined = mở phiên mới sạch.
+  let resumeId: string | undefined = opts.sessionId;
+  const wanted = path.join(configDir, "projects", encodeProjectDir(project.path), `${resumeId}.jsonl`);
+  if (!fs.existsSync(wanted)) {
+    const latest = latestTranscriptFile(configDir, project.path);
+    resumeId = latest ? path.basename(latest, ".jsonl") : undefined;
+  }
+
+  // Tái dùng terminal record khớp (provider+account+session) nếu có, tránh sinh "terminal ma" mỗi lần
+  // resume; chưa có thì tạo mới để tab có id & lần switch account sau định tuyến đúng.
+  let terminal = project.terminals.find(
+    (t) => t.providerId === provider.id && t.aiAccountId === account?.id && t.sessionId === opts.sessionId,
+  );
+  if (!terminal) {
+    const sameProvider = project.terminals.filter((t) => t.providerId === provider.id).length;
+    terminal = {
+      id: randomUUID(),
+      name: autoName(provider.id, sameProvider),
+      providerId: provider.id,
+      aiAccountId: account?.id,
+      sessionId: resumeId,
+    };
+    addTerminal(project.id, terminal);
+  }
+
+  const args =
+    resumeId && provider.resumeFlag
+      ? [...provider.launchCmd.slice(1), provider.resumeFlag, resumeId]
+      : [...provider.launchCmd.slice(1)];
+
+  return {
+    cmd,
+    args,
+    env,
+    cwd: project.path,
+    terminal,
+    providerId: provider.id,
+    projectId: project.id,
+    projectName: project.name,
+    configDir,
+    accountLabel: account?.label,
+    mode: "run",
   };
 }
 

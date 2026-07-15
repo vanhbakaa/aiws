@@ -22,6 +22,8 @@ const DICT: Record<string, { vi: string; en: string }> = {
   shell: { vi: "SHELL", en: "SHELL" },
   shellIsolated: { vi: "terminal cô lập", en: "isolated terminal" },
   shellNoAi: { vi: "không chạy AI", en: "no AI" },
+  resumeTitle: { vi: "Mở lại phiên này", en: "Resume this session" },
+  pastSessions: { vi: "phiên cũ", en: "past sessions" },
 
   // empty pane
   noTabs: { vi: " Chưa có tab nào.", en: " No tabs yet." },

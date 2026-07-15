@@ -133,6 +133,13 @@ export interface AiwsApi {
   ptyWrite(tabId: string, data: string): void;
   ptyResize(tabId: string, cols: number, rows: number): void;
 
+  // Synchronous, preload-side. navigator.clipboard needs document focus and a permission, and it
+  // rejects (silently) when either is missing; the Electron clipboard has neither requirement.
+  // filePathFor resolves a dropped File to its on-disk path (only the preload may ask for it).
+  clipboardRead(): string;
+  clipboardWrite(text: string): void;
+  filePathFor(file: File): string;
+
   // events (main → renderer); each returns an unsubscribe fn
   onPtyData(cb: (tabId: string, chunk: string) => void): () => void;
   onPtyExit(cb: (tabId: string, code: number) => void): () => void;

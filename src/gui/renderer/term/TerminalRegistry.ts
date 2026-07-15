@@ -34,6 +34,9 @@ interface Entry {
   layer: HTMLDivElement;
 }
 
+// A bare Windows path breaks into several tokens the moment it contains a space.
+const quotePath = (p: string) => (/\s/.test(p) ? `"${p}"` : p);
+
 /**
  * One xterm per tab, all kept mounted (background tabs keep streaming); only the active layer is
  * shown. Lives outside React and is driven imperatively. A pending-data buffer covers the small
@@ -82,34 +85,98 @@ export class TerminalRegistry {
     term.open(layer);
     // Clipboard: xterm wires none. Ctrl+C stays as interrupt; Ctrl+Shift+C copies the selection,
     // Ctrl+Shift+V pastes. Right click copies when there is a selection, otherwise pastes.
+    // Every path below must end in EXACTLY one term.paste(), which is why each one both
+    // preventDefaults (Ctrl+Shift+V is also Chromium's own "paste as plain text", and that native
+    // paste event would reach xterm's built-in paste listener for a second insert) and, for the
+    // mouse, stops the event before xterm's rightClickHandler runs — see wireMouse.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown" || !(e.ctrlKey || e.metaKey) || !e.shiftKey) return true;
       const k = e.key.toLowerCase();
       if (k === "c" && term.hasSelection()) {
-        void navigator.clipboard.writeText(term.getSelection());
+        e.preventDefault();
+        this.copySelection(term);
         return false;
       }
       if (k === "v") {
-        void navigator.clipboard.readText().then((t) => t && term.paste(t));
+        e.preventDefault();
+        this.pasteClipboard(term);
         return false;
       }
       return true;
     });
-    layer.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      if (term.hasSelection()) {
-        void navigator.clipboard.writeText(term.getSelection());
-        term.clearSelection();
-      } else {
-        void navigator.clipboard.readText().then((t) => t && term.paste(t));
-      }
-    });
+    this.wireMouse(term, layer);
     try {
       fit.fit();
     } catch {
       /* host not laid out yet */
     }
     return { term, fit, layer };
+  }
+
+  /** False when nothing is selected, so callers can fall through to paste. */
+  private copySelection(term: Terminal): boolean {
+    if (!term.hasSelection()) return false;
+    const sel = term.getSelection();
+    if (!sel) return false;
+    this.api.clipboardWrite(sel);
+    return true;
+  }
+
+  private pasteClipboard(term: Terminal): void {
+    const text = this.api.clipboardRead();
+    if (text) term.paste(text);
+  }
+
+  /** Right click (copy the selection, else paste) and file drop, both in the capture phase.
+   *
+   *  Capture matters: xterm's own contextmenu handler parks its hidden helper textarea under the
+   *  cursor at 20x20 / z-index 1000 and only puts it back on the next render. It exists to make the
+   *  browser's native context menu work, which we don't use — and while it sits there it swallows
+   *  the drag that starts the next selection, so copying appeared to need several attempts.
+   *  Stopping the event here means it never runs. */
+  private wireMouse(term: Terminal, layer: HTMLDivElement): void {
+    layer.addEventListener(
+      "contextmenu",
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.copySelection(term)) term.clearSelection();
+        else this.pasteClipboard(term);
+      },
+      true,
+    );
+    // Funnel any native paste event (OS-level, or a future menu item) through the same single
+    // paste instead of letting xterm's two paste listeners handle it as well.
+    layer.addEventListener(
+      "paste",
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const text = e.clipboardData?.getData("text/plain");
+        if (text) term.paste(text);
+      },
+      true,
+    );
+
+    // Drag & drop: hand the CLI the dropped file's path — that is how you point Claude/Codex at an
+    // image. Without a drop listener the window swallows it (main preventDefaults will-navigate),
+    // which is why dropping an image did nothing at all.
+    layer.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      layer.classList.add("drop-on");
+    });
+    layer.addEventListener("dragleave", () => layer.classList.remove("drop-on"));
+    layer.addEventListener("drop", (e) => {
+      e.preventDefault();
+      layer.classList.remove("drop-on");
+      const files = [...(e.dataTransfer?.files ?? [])].map((f) => this.api.filePathFor(f)).filter(Boolean);
+      const text = files.length
+        ? files.map(quotePath).join(" ") + " " // trailing space: keep typing after the path
+        : (e.dataTransfer?.getData("text/plain") ?? "");
+      if (text) term.paste(text);
+      term.focus();
+    });
   }
 
   /** Create + measure a terminal before aiws.openTab (dims must be known at spawn time). Returns a
@@ -164,7 +231,9 @@ export class TerminalRegistry {
     this.activeId = tabId;
     for (const [id, e] of this.entries) {
       const on = id === tabId;
-      e.layer.className = "term-layer " + (on ? "shown" : "hidden");
+      // toggle, not className=: a rewrite here would drop the transient drop-on highlight
+      e.layer.classList.toggle("shown", on);
+      e.layer.classList.toggle("hidden", !on);
       if (on) this.reveal(id, e);
     }
   }

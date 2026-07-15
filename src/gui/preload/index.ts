@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { clipboard, contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AiwsApi, PanelSnapshot, ProjectTree, WorkspaceSnapshot } from "../shared/contract";
 
 // Thin typed bridge. The renderer only ever sees window.aiws — never Node, never raw ipcRenderer.
@@ -26,6 +26,17 @@ const api: AiwsApi = {
 
   ptyWrite: (tabId, data) => ipcRenderer.send("pty:write", { tabId, data }),
   ptyResize: (tabId, cols, rows) => ipcRenderer.send("pty:resize", { tabId, cols, rows }),
+
+  clipboardRead: () => clipboard.readText(),
+  clipboardWrite: (text) => clipboard.writeText(text),
+  // Empty for anything that isn't a real file on disk (e.g. dragged out of a web page).
+  filePathFor: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
 
   onPtyData: (cb) => {
     const h = (_e: unknown, p: { tabId: string; chunk: string }) => cb(p.tabId, p.chunk);
